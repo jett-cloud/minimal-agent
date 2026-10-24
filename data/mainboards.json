@@ -1,0 +1,402 @@
+[
+  {
+    "id": "asus-tuf-gaming-b650-plus-wifi",
+    "brand": "ASUS",
+    "model": "TUF GAMING B650-PLUS WIFI",
+    "aliases": ["TUF B650-PLUS WIFI", "B650 PLUS WIFI"],
+    "chipset": "AMD B650",
+    "socket": "AM5",
+    "form_factor": "ATX",
+    "cpu_support": ["AMD Ryzen 9000 Series", "AMD Ryzen 8000 Series", "AMD Ryzen 7000 Series"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 4,
+      "max_capacity_gb": 256,
+      "max_speed_mt_s": 7600,
+      "ecc_support": "ECC and non-ECC unbuffered; ECC mode depends on CPU"
+    },
+    "expansion": {"pcie_x16_slots": 2, "m2_slots": 3, "sata_ports": 4},
+    "network": {"ethernet": "Realtek 2.5GbE", "wifi": "Wi-Fi 6", "bluetooth": "5.2"},
+    "audio": "Realtek 7.1 surround sound codec",
+    "features": ["PCIe 5.0 M.2", "USB 20Gbps Type-C", "BIOS FlashBack"],
+    "source": {
+      "url": "https://www.asus.com/motherboards-components/motherboards/tuf-gaming/tuf-gaming-b650-plus-wifi/techspec/",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "asus-rog-strix-b650e-i-gaming-wifi",
+    "brand": "ASUS",
+    "model": "ROG STRIX B650E-I GAMING WIFI",
+    "aliases": ["ROG B650E-I", "B650E-I GAMING WIFI"],
+    "chipset": "AMD B650E",
+    "socket": "AM5",
+    "form_factor": "Mini-ITX",
+    "cpu_support": ["AMD Ryzen 9000 Series", "AMD Ryzen 8000 Series", "AMD Ryzen 7000 Series"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 2,
+      "max_capacity_gb": 128,
+      "max_speed_mt_s": 8000,
+      "ecc_support": "ECC and non-ECC unbuffered; ECC mode depends on CPU"
+    },
+    "expansion": {"pcie_x16_slots": 1, "m2_slots": 2, "sata_ports": 2},
+    "network": {"ethernet": "Intel 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.2"},
+    "audio": "ROG SupremeFX ALC4080",
+    "features": ["PCIe 5.0 x16", "PCIe 5.0 M.2", "USB4", "BIOS FlashBack"],
+    "source": {
+      "url": "https://rog.asus.com/motherboards/rog-strix/rog-strix-b650e-i-gaming-wifi-model/spec/",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "asus-tuf-gaming-z790-plus-wifi",
+    "brand": "ASUS",
+    "model": "TUF GAMING Z790-PLUS WIFI",
+    "aliases": ["TUF Z790-PLUS WIFI", "Z790 PLUS WIFI"],
+    "chipset": "Intel Z790",
+    "socket": "LGA1700",
+    "form_factor": "ATX",
+    "cpu_support": ["Intel Core 14th Gen", "Intel Core 13th Gen", "Intel Core 12th Gen"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 4,
+      "max_capacity_gb": 192,
+      "max_speed_mt_s": 7200,
+      "ecc_support": "Non-ECC unbuffered"
+    },
+    "expansion": {"pcie_x16_slots": 2, "m2_slots": 4, "sata_ports": 4},
+    "network": {"ethernet": "Intel 2.5GbE", "wifi": "Wi-Fi 6", "bluetooth": "5.2"},
+    "audio": "Realtek S1220A 7.1 surround sound codec",
+    "features": ["PCIe 5.0 x16", "Thunderbolt header", "USB 20Gbps Type-C", "BIOS FlashBack"],
+    "source": {
+      "url": "https://www.asus.com/us/motherboards-components/motherboards/tuf-gaming/tuf-gaming-z790-plus-wifi/techspec/",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "asus-prime-b760m-a-wifi-d4",
+    "brand": "ASUS",
+    "model": "PRIME B760M-A WIFI D4",
+    "aliases": ["B760M-A WIFI D4", "PRIME B760M A WIFI D4"],
+    "chipset": "Intel B760",
+    "socket": "LGA1700",
+    "form_factor": "Micro-ATX",
+    "cpu_support": ["Intel Core 14th Gen", "Intel Core 13th Gen", "Intel Core 12th Gen"],
+    "memory": {
+      "type": "DDR4",
+      "slots": 4,
+      "max_capacity_gb": 128,
+      "max_speed_mt_s": 5333,
+      "ecc_support": "Non-ECC unbuffered"
+    },
+    "expansion": {"pcie_x16_slots": 2, "m2_slots": 2, "sata_ports": 4},
+    "network": {"ethernet": "Realtek 2.5GbE", "wifi": "Wi-Fi 6", "bluetooth": "5.2"},
+    "audio": "Realtek 7.1 surround sound codec",
+    "features": ["PCIe 4.0 x16", "Thunderbolt header", "Aura Sync"],
+    "source": {
+      "url": "https://www.asus.com/motherboards-components/motherboards/prime/prime-b760m-a-wifi-d4/techspec/",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "msi-mag-b650-tomahawk-wifi",
+    "brand": "MSI",
+    "model": "MAG B650 TOMAHAWK WIFI",
+    "aliases": ["B650 TOMAHAWK WIFI", "MAG B650 TOMAHAWK"],
+    "chipset": "AMD B650",
+    "socket": "AM5",
+    "form_factor": "ATX",
+    "cpu_support": ["AMD Ryzen 9000 Series", "AMD Ryzen 8000 Series", "AMD Ryzen 7000 Series"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 4,
+      "max_capacity_gb": 256,
+      "max_speed_mt_s": 7600,
+      "ecc_support": "Non-ECC unbuffered"
+    },
+    "expansion": {"pcie_x16_slots": 2, "m2_slots": 3, "sata_ports": 6},
+    "network": {"ethernet": "Realtek 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.2"},
+    "audio": "Realtek ALC4080 7.1-channel audio",
+    "features": ["PCIe 4.0 x16", "USB 20Gbps Type-C", "Flash BIOS Button"],
+    "source": {
+      "url": "https://www.msi.com/Motherboard/MAG-B650-TOMAHAWK-WIFI/Specification",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "msi-mpg-b650i-edge-wifi",
+    "brand": "MSI",
+    "model": "MPG B650I EDGE WIFI",
+    "aliases": ["B650I EDGE WIFI", "MPG B650I EDGE"],
+    "chipset": "AMD B650",
+    "socket": "AM5",
+    "form_factor": "Mini-ITX",
+    "cpu_support": ["AMD Ryzen 9000 Series", "AMD Ryzen 8000 Series", "AMD Ryzen 7000 Series"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 2,
+      "max_capacity_gb": 128,
+      "max_speed_mt_s": 7200,
+      "ecc_support": "Non-ECC unbuffered"
+    },
+    "expansion": {"pcie_x16_slots": 1, "m2_slots": 2, "sata_ports": 4},
+    "network": {"ethernet": "Realtek 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.3"},
+    "audio": "Realtek ALC4080 7.1-channel audio",
+    "features": ["PCIe 4.0 x16", "USB 20Gbps Type-C", "Flash BIOS Button"],
+    "source": {
+      "url": "https://www.msi.com/Motherboard/MPG-B650I-EDGE-WIFI/Specification",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "msi-mag-z790-tomahawk-wifi",
+    "brand": "MSI",
+    "model": "MAG Z790 TOMAHAWK WIFI",
+    "aliases": ["Z790 TOMAHAWK WIFI", "MAG Z790 TOMAHAWK"],
+    "chipset": "Intel Z790",
+    "socket": "LGA1700",
+    "form_factor": "ATX",
+    "cpu_support": ["Intel Core 14th Gen", "Intel Core 13th Gen", "Intel Core 12th Gen"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 4,
+      "max_capacity_gb": 256,
+      "max_speed_mt_s": 7200,
+      "ecc_support": "Non-ECC unbuffered"
+    },
+    "expansion": {"pcie_x16_slots": 2, "m2_slots": 4, "sata_ports": 7},
+    "network": {"ethernet": "Intel 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.3"},
+    "audio": "Realtek ALC4080 7.1-channel audio",
+    "features": ["PCIe 5.0 x16", "USB 20Gbps Type-C", "Flash BIOS Button"],
+    "source": {
+      "url": "https://www.msi.com/Motherboard/MAG-Z790-TOMAHAWK-WIFI/Specification",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "msi-pro-b760m-a-wifi-ddr4",
+    "brand": "MSI",
+    "model": "PRO B760M-A WIFI DDR4",
+    "aliases": ["B760M-A WIFI DDR4", "PRO B760M A WIFI DDR4"],
+    "chipset": "Intel B760",
+    "socket": "LGA1700",
+    "form_factor": "Micro-ATX",
+    "cpu_support": ["Intel Core 14th Gen", "Intel Core 13th Gen", "Intel Core 12th Gen"],
+    "memory": {
+      "type": "DDR4",
+      "slots": 4,
+      "max_capacity_gb": 128,
+      "max_speed_mt_s": 5333,
+      "ecc_support": "Non-ECC unbuffered"
+    },
+    "expansion": {"pcie_x16_slots": 2, "m2_slots": 2, "sata_ports": 4},
+    "network": {"ethernet": "Realtek 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.3"},
+    "audio": "Realtek ALC897 7.1-channel audio",
+    "features": ["PCIe 4.0 x16", "USB 10Gbps", "Flash BIOS Button"],
+    "source": {
+      "url": "https://www.msi.com/Motherboard/PRO-B760M-A-WIFI-DDR4/Specification",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "gigabyte-b650-aorus-elite-ax",
+    "brand": "Gigabyte",
+    "model": "B650 AORUS ELITE AX",
+    "aliases": ["AORUS B650 ELITE AX", "B650 AORUS ELITE"],
+    "chipset": "AMD B650",
+    "socket": "AM5",
+    "form_factor": "ATX",
+    "cpu_support": ["AMD Ryzen 9000 Series", "AMD Ryzen 8000 Series", "AMD Ryzen 7000 Series"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 4,
+      "max_capacity_gb": 256,
+      "max_speed_mt_s": 8000,
+      "ecc_support": "ECC and non-ECC unbuffered; ECC mode depends on CPU"
+    },
+    "expansion": {"pcie_x16_slots": 3, "m2_slots": 3, "sata_ports": 4},
+    "network": {"ethernet": "Realtek 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.3"},
+    "audio": "Realtek 7.1-channel HD audio codec",
+    "features": ["PCIe 5.0 M.2", "USB 20Gbps Type-C", "Q-Flash Plus"],
+    "source": {
+      "url": "https://www.gigabyte.com/Motherboard/B650-AORUS-ELITE-AX-rev-12/sp",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "gigabyte-b650i-aorus-ultra",
+    "brand": "Gigabyte",
+    "model": "B650I AORUS ULTRA",
+    "aliases": ["AORUS B650I ULTRA", "B650I AORUS"],
+    "chipset": "AMD B650",
+    "socket": "AM5",
+    "form_factor": "Mini-ITX",
+    "cpu_support": ["AMD Ryzen 9000 Series", "AMD Ryzen 8000 Series", "AMD Ryzen 7000 Series"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 2,
+      "max_capacity_gb": 128,
+      "max_speed_mt_s": 8000,
+      "ecc_support": "ECC and non-ECC unbuffered; ECC mode depends on CPU"
+    },
+    "expansion": {"pcie_x16_slots": 1, "m2_slots": 3, "sata_ports": 4},
+    "network": {"ethernet": "Intel 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.3"},
+    "audio": "Realtek ALC4080 HD audio codec",
+    "features": ["PCIe 5.0 M.2", "USB Type-C DisplayPort", "Q-Flash Plus"],
+    "source": {
+      "url": "https://www.gigabyte.com/Motherboard/B650I-AORUS-ULTRA-rev-13/sp",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "gigabyte-z790-aorus-elite-ax",
+    "brand": "Gigabyte",
+    "model": "Z790 AORUS ELITE AX",
+    "aliases": ["AORUS Z790 ELITE AX", "Z790 AORUS ELITE"],
+    "chipset": "Intel Z790",
+    "socket": "LGA1700",
+    "form_factor": "ATX",
+    "cpu_support": ["Intel Core 14th Gen", "Intel Core 13th Gen", "Intel Core 12th Gen"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 4,
+      "max_capacity_gb": 192,
+      "max_speed_mt_s": 7600,
+      "ecc_support": "Non-ECC unbuffered"
+    },
+    "expansion": {"pcie_x16_slots": 3, "m2_slots": 4, "sata_ports": 6},
+    "network": {"ethernet": "Realtek 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.3"},
+    "audio": "Realtek ALC1220-VB HD audio codec",
+    "features": ["PCIe 5.0 x16", "USB 20Gbps Type-C", "Q-Flash Plus"],
+    "source": {
+      "url": "https://www.gigabyte.com/Motherboard/Z790-AORUS-ELITE-AX-rev-1x/sp",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "gigabyte-b760m-ds3h-ax-ddr4",
+    "brand": "Gigabyte",
+    "model": "B760M DS3H AX DDR4",
+    "aliases": ["B760M DS3H AX D4", "B760M DS3H AX"],
+    "chipset": "Intel B760",
+    "socket": "LGA1700",
+    "form_factor": "Micro-ATX",
+    "cpu_support": ["Intel Core 14th Gen", "Intel Core 13th Gen", "Intel Core 12th Gen"],
+    "memory": {
+      "type": "DDR4",
+      "slots": 4,
+      "max_capacity_gb": 128,
+      "max_speed_mt_s": 5333,
+      "ecc_support": "ECC unbuffered operates in non-ECC mode; non-ECC unbuffered"
+    },
+    "expansion": {"pcie_x16_slots": 2, "m2_slots": 2, "sata_ports": 4},
+    "network": {"ethernet": "Realtek 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.3"},
+    "audio": "Realtek 7.1-channel HD audio codec",
+    "features": ["PCIe 4.0 x16", "Rear USB-C 10Gbps", "Q-Flash Plus"],
+    "source": {
+      "url": "https://www.gigabyte.com/Motherboard/B760M-DS3H-AX-DDR4-rev-1x/sp",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "asrock-b650e-steel-legend-wifi",
+    "brand": "ASRock",
+    "model": "B650E Steel Legend WiFi",
+    "aliases": ["B650E Steel Legend", "Steel Legend B650E WiFi"],
+    "chipset": "AMD B650E",
+    "socket": "AM5",
+    "form_factor": "ATX",
+    "cpu_support": ["AMD Ryzen 9000 Series", "AMD Ryzen 8000 Series", "AMD Ryzen 7000 Series"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 4,
+      "max_capacity_gb": 256,
+      "max_speed_mt_s": 7600,
+      "ecc_support": "ECC and non-ECC unbuffered; ECC mode depends on CPU"
+    },
+    "expansion": {"pcie_x16_slots": 2, "m2_slots": 3, "sata_ports": 2},
+    "network": {"ethernet": "Dragon 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.2"},
+    "audio": "Realtek ALC897 7.1-channel HD audio",
+    "features": ["PCIe 5.0 x16", "PCIe 5.0 M.2", "BIOS Flashback"],
+    "source": {
+      "url": "https://www.asrock.com/mb/AMD/B650E%20Steel%20Legend%20WiFi/index.asp",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "asrock-b650i-lightning-wifi",
+    "brand": "ASRock",
+    "model": "B650I Lightning WiFi",
+    "aliases": ["B650I Lightning", "Lightning B650I WiFi"],
+    "chipset": "AMD B650",
+    "socket": "AM5",
+    "form_factor": "Mini-ITX",
+    "cpu_support": ["AMD Ryzen 9000 Series", "AMD Ryzen 8000 Series", "AMD Ryzen 7000 Series"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 2,
+      "max_capacity_gb": 128,
+      "max_speed_mt_s": 7200,
+      "ecc_support": "ECC and non-ECC unbuffered; ECC mode depends on CPU"
+    },
+    "expansion": {"pcie_x16_slots": 1, "m2_slots": 2, "sata_ports": 2},
+    "network": {"ethernet": "Dragon 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.2"},
+    "audio": "Realtek ALC897 7.1-channel HD audio",
+    "features": ["PCIe 5.0 M.2", "Rear USB-C 10Gbps", "BIOS Flashback"],
+    "source": {
+      "url": "https://www.asrock.com/mb/amd/B650I%20Lightning%20WiFi/",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "asrock-z790-steel-legend-wifi",
+    "brand": "ASRock",
+    "model": "Z790 Steel Legend WiFi",
+    "aliases": ["Z790 Steel Legend", "Steel Legend Z790 WiFi"],
+    "chipset": "Intel Z790",
+    "socket": "LGA1700",
+    "form_factor": "ATX",
+    "cpu_support": ["Intel Core 14th Gen", "Intel Core 13th Gen", "Intel Core 12th Gen"],
+    "memory": {
+      "type": "DDR5",
+      "slots": 4,
+      "max_capacity_gb": 256,
+      "max_speed_mt_s": 7200,
+      "ecc_support": "Non-ECC unbuffered"
+    },
+    "expansion": {"pcie_x16_slots": 3, "m2_slots": 5, "sata_ports": 8},
+    "network": {"ethernet": "Dragon 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.3"},
+    "audio": "Realtek ALC897 7.1-channel HD audio",
+    "features": ["PCIe 5.0 x16", "PCIe 5.0 M.2", "Front USB-C 20Gbps", "BIOS Flashback"],
+    "source": {
+      "url": "https://asrock.com/MB/Intel/Z790%20Steel%20Legend%20WiFi/index.asp",
+      "verified_at": "2026-10-22"
+    }
+  },
+  {
+    "id": "asrock-b760m-pro-rs-d4-wifi",
+    "brand": "ASRock",
+    "model": "B760M Pro RS/D4 WiFi",
+    "aliases": ["B760M Pro RS D4 WiFi", "B760M Pro RS/D4"],
+    "chipset": "Intel B760",
+    "socket": "LGA1700",
+    "form_factor": "Micro-ATX",
+    "cpu_support": ["Intel Core 14th Gen", "Intel Core 13th Gen", "Intel Core 12th Gen"],
+    "memory": {
+      "type": "DDR4",
+      "slots": 4,
+      "max_capacity_gb": 128,
+      "max_speed_mt_s": 5333,
+      "ecc_support": "Non-ECC unbuffered"
+    },
+    "expansion": {"pcie_x16_slots": 1, "m2_slots": 3, "sata_ports": 4},
+    "network": {"ethernet": "Dragon 2.5GbE", "wifi": "Wi-Fi 6E", "bluetooth": "5.2"},
+    "audio": "Realtek ALC897 7.1-channel HD audio",
+    "features": ["PCIe 4.0 x16", "Front USB-C", "Polychrome RGB"],
+    "source": {
+      "url": "https://www.asrock.com/mb/Intel/B760M%20Pro%20RSD4%20WiFi/index.asp",
+      "verified_at": "2026-10-22"
+    }
+  }
+]
