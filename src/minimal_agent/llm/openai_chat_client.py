@@ -293,17 +293,13 @@ class OpenAIChatCompletionsLLM:
         client: Any,
         *,
         model: str,
-        timeout_seconds: float = 20.0,
         retry_policy: RetryPolicy | None = None,
         sleep: Sleep = asyncio.sleep,
     ) -> None:
         if not model.strip():
             raise ValueError("LLM model must not be empty")
-        if timeout_seconds <= 0:
-            raise ValueError("LLM timeout must be positive")
         self._client = client
         self._model = model.strip()
-        self._timeout_seconds = timeout_seconds
         self._retry_policy = retry_policy or RetryPolicy()
         self._sleep = sleep
 
@@ -313,18 +309,15 @@ class OpenAIChatCompletionsLLM:
             saw_terminal = False
             mapper = ChatCompletionsEventMapper()
             try:
-                async with asyncio.timeout(self._timeout_seconds):
-                    stream = await self._client.chat.completions.create(
-                        **self._request_kwargs(request)
-                    )
-                    async for chunk in stream:
-                        for event in mapper.map(chunk):
-                            emitted_semantic_event = True
-                            yield event
-                    for event in mapper.finish():
+                stream = await self._client.chat.completions.create(**self._request_kwargs(request))
+                async for chunk in stream:
+                    for event in mapper.map(chunk):
                         emitted_semantic_event = True
-                        saw_terminal = saw_terminal or is_terminal_event(event)
                         yield event
+                for event in mapper.finish():
+                    emitted_semantic_event = True
+                    saw_terminal = saw_terminal or is_terminal_event(event)
+                    yield event
                 if not saw_terminal:
                     raise LLMStreamError(
                         "LLM_STREAM_INTERRUPTED",

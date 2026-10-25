@@ -97,6 +97,7 @@ class FakeSDKClient:
 
 
 def test_event_mapper_maps_text_public_reasoning_and_completion() -> None:
+    # 验证事件映射器转换正文、公开推理和完成事件。
     mapper = ResponsesEventMapper()
 
     started = mapper.map(response_started())[0]
@@ -129,6 +130,7 @@ def test_event_mapper_maps_text_public_reasoning_and_completion() -> None:
 
 
 def test_event_mapper_exposes_provider_returned_raw_reasoning_text() -> None:
+    # 验证事件映射器暴露供应商返回的原始推理文本。
     mapper = ResponsesEventMapper()
     mapper.map(
         raw_event(
@@ -161,6 +163,7 @@ def test_event_mapper_exposes_provider_returned_raw_reasoning_text() -> None:
 
 
 def test_event_mapper_assembles_tool_metadata_across_events() -> None:
+    # 验证事件映射器跨事件组装工具元数据。
     mapper = ResponsesEventMapper()
     started = mapper.map(
         raw_event(
@@ -199,6 +202,7 @@ def test_event_mapper_assembles_tool_metadata_across_events() -> None:
 
 
 def test_event_mapper_preserves_reasoning_item_for_tool_continuation() -> None:
+    # 验证事件映射器为工具续接保留推理项。
     class ReasoningItem:
         type = "reasoning"
 
@@ -215,6 +219,7 @@ def test_event_mapper_preserves_reasoning_item_for_tool_continuation() -> None:
 
 
 def test_event_mapper_handles_refusal_terminal_states_and_unknown_events() -> None:
+    # 验证事件映射器处理拒绝、终态和未知事件。
     mapper = ResponsesEventMapper()
     refusal = mapper.map(raw_event("response.refusal.delta", item_id="msg_1", delta="Cannot help"))[
         0
@@ -250,6 +255,7 @@ def test_event_mapper_handles_refusal_terminal_states_and_unknown_events() -> No
 
 @pytest.mark.asyncio
 async def test_fake_llm_is_scripted_and_records_requests() -> None:
+    # 验证 FakeLLM 按脚本响应并记录请求。
     request = llm_request()
     fake = FakeLLM([[ResponseStarted(response_id="resp_fake"), TextDelta(item_id="m", delta="x")]])
 
@@ -263,6 +269,7 @@ async def test_fake_llm_is_scripted_and_records_requests() -> None:
 
 @pytest.mark.asyncio
 async def test_openai_adapter_builds_responses_request_and_maps_stream() -> None:
+    # 验证 OpenAI 适配器构建 Responses 请求并映射流。
     sdk = FakeSDKClient([[response_started(), response_completed()]])
     adapter = OpenAIResponsesLLM(
         sdk,
@@ -283,7 +290,27 @@ async def test_openai_adapter_builds_responses_request_and_maps_stream() -> None
 
 
 @pytest.mark.asyncio
+async def test_openai_adapter_omits_output_limit_when_request_has_none() -> None:
+    # 验证未配置输出上限时适配器不发送该参数。
+    sdk = FakeSDKClient([[response_started(), response_completed()]])
+    adapter = OpenAIResponsesLLM(
+        sdk,
+        model="unlimited-model",
+        retry_policy=RetryPolicy(max_retries=0),
+    )
+    request = LLMRequest(
+        instructions="test",
+        input=[{"role": "user", "content": "hello"}],
+    )
+
+    _ = [event async for event in adapter.stream(request)]
+
+    assert "max_output_tokens" not in sdk.responses.calls[0]
+
+
+@pytest.mark.asyncio
 async def test_openai_adapter_retries_timeout_before_output() -> None:
+    # 验证输出开始前超时时适配器会重试。
     timeout = APITimeoutError(request=httpx.Request("POST", "https://example.test/responses"))
     sdk = FakeSDKClient([timeout, [response_started(), response_completed()]])
     delays: list[float] = []
@@ -338,6 +365,7 @@ async def test_openai_adapter_retries_transient_sdk_errors(
     error_factory: Callable[[], Exception],
     expected_code: str,
 ) -> None:
+    # 验证适配器会重试 SDK 瞬时错误。
     sdk = FakeSDKClient([error_factory(), [response_started(), response_completed()]])
 
     async def no_sleep(delay: float) -> None:
@@ -359,6 +387,7 @@ async def test_openai_adapter_retries_transient_sdk_errors(
 
 @pytest.mark.asyncio
 async def test_openai_adapter_does_not_retry_interrupted_partial_stream() -> None:
+    # 验证部分流中断后适配器不会重试。
     sdk = FakeSDKClient(
         [[response_started(), raw_event("response.output_text.delta", item_id="m", delta="half")]]
     )
@@ -378,6 +407,7 @@ async def test_openai_adapter_does_not_retry_interrupted_partial_stream() -> Non
 
 @pytest.mark.asyncio
 async def test_sdk_client_factory_and_deepseek_setting_aliases(monkeypatch) -> None:
+    # 验证 SDK 客户端工厂和 DeepSeek 配置别名。
     monkeypatch.setenv("DEEPSEEK_API_KEY", "secret-test-key")
     monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-flash")
     monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
@@ -402,6 +432,7 @@ async def test_sdk_client_factory_and_deepseek_setting_aliases(monkeypatch) -> N
 
 
 def test_generic_llm_settings_are_provider_neutral(monkeypatch) -> None:
+    # 验证通用 LLM 配置不绑定特定供应商。
     monkeypatch.setenv("LLM_API_KEY", "generic-key")
     monkeypatch.setenv("LLM_MODEL", "generic-model")
     monkeypatch.setenv("LLM_API_STYLE", "chat_completions")
@@ -420,6 +451,7 @@ def test_generic_llm_settings_are_provider_neutral(monkeypatch) -> None:
 
 
 def test_blank_optional_reasoning_settings_are_ignored(monkeypatch) -> None:
+    # 验证空的可选推理配置会被忽略。
     monkeypatch.setenv("LLM_REASONING_EFFORT", "")
     monkeypatch.setenv("LLM_REASONING_SUMMARY", "")
 

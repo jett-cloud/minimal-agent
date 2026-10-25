@@ -1,36 +1,27 @@
 # Minimal Agent
 
-一个不依赖 Agent 框架的最小可用 ReAct Agent，使用 FastAPI、Pydantic、SQLite、
-OpenAI Python SDK、pytest 和 Ruff。
+一个不依赖 Agent 框架的最小 ReAct Agent：Python 3.12 + FastAPI + SQLite，前端为
+Vue 3 + Vite。支持持久化 Session、流式推理/正文、工具调用、SSE 断线续传和可审计 Trace。
 
-项目采用逐步 Review 的开发方式。当前状态、Review 结论和下一步计划以
-[`docs/progress.md`](docs/progress.md) 为准，完整架构以
-[`docs/design.md`](docs/design.md) 为准。
+## 运行方式
 
-部署、备份、恢复和故障排查见 [`docs/operations.md`](docs/operations.md)。
-
-## 本地启动
+后端：
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
+```
+
+编辑 `.env` 时只需填写 `LLM_API_KEY`、`LLM_MODEL`；使用兼容服务时再取消注释并填写
+`LLM_BASE_URL`，仅在供应商不支持 Responses 时切换 `LLM_API_STYLE`。示例中的其余配置
+均已注释，保持注释即可使用代码默认值。
+
+```powershell
 .venv\Scripts\python -m uvicorn minimal_agent.main:app --reload
 ```
 
-编辑 `.env` 时必须填写 LLM Key、模型，兼容服务还要填写 base URL，并按实际模型填写
-`CONTEXT_WINDOW_TOKENS`；保留为 `0` 时 Agent 消息接口会明确返回 503，但健康检查和
-Session 查询仍可使用。生产式启动必须使用单 worker，完整命令见运行手册。
-
-`LLM_API_STYLE` 支持 `responses` 和 `chat_completions`。官方 OpenAI 可留空
-`LLM_BASE_URL`；其他 OpenAI-compatible 服务填写自己的端点。推荐只使用通用 `LLM_*`
-变量，旧 `OPENAI_*`/`DEEPSEEK_*` 名称仅作为兼容别名。
-
-健康检查：`GET http://127.0.0.1:8000/health`
-
-## Vue 测试控制台
-
-仓库包含一个用于本地验收 Session、工具调用、SSE 和 Trace 的 Vue 3 前端：
+前端（另开终端）：
 
 ```powershell
 cd frontend
@@ -38,91 +29,139 @@ npm install
 npm run dev
 ```
 
-保持后端运行在 `http://127.0.0.1:8000`，然后打开 `http://127.0.0.1:5173`。Vite 会在
-开发环境代理 `/health` 和 `/v1`，无需额外配置 CORS。详细说明见
-[`frontend/README.md`](frontend/README.md)。
+打开 `http://127.0.0.1:5173`；后端健康检查为 `http://127.0.0.1:8000/health`。
+当前架构只支持单进程、单 Uvicorn worker。
 
-HTTP API：
+## 系统设计
 
-- `POST /v1/sessions`、`GET /v1/sessions`、`GET /v1/sessions/{session_id}`
-- `GET /v1/sessions/{session_id}/messages`
-- `POST /v1/sessions/{session_id}/messages`，请求体为 `{"text":"..."}`，返回 `202`
-- `GET /v1/runs/{run_id}`、`GET /v1/runs/{run_id}/trace`
-- `GET /v1/runs/{run_id}/events`，以 SSE 重放并跟随 Run
-
-同一 Session 同时只允许一个 running Run；重复提交返回 `409 SESSION_BUSY`。所有 JSON
-错误使用 `{"error":{"code","message","details"}}` 结构。缺少 LLM 配置时健康检查和
-Session 查询仍可用，提交消息返回 `503 AGENT_UNAVAILABLE`。
-
-本地主板搜索数据位于 `data/mainboards.json`，可通过 `MAINBOARD_DATA_PATH` 指向其他文件。
-字段和更新规则见 [`data/README.md`](data/README.md)。
-
-天气工具使用 Open-Meteo 地理编码和预报 API，不需要 API Key；运行时需要访问外网。
-`WEATHER_HTTP_TIMEOUT_SECONDS` 同时限制连接、读取、写入和连接池等待时间。
-
-Session Context 从 SQLite 重建，并在估算输入达到模型窗口的 80% 时压缩旧轮次。
-`CONTEXT_WINDOW_TOKENS` 必须按实际模型显式配置；`SYSTEM_PROMPT_PATH`、
-`SUMMARIZE_PROMPT_PATH` 可覆盖默认提示词文件。原始消息不会因摘要而删除。
-
-Run 流通过 `GET /v1/runs/{run_id}/events` 以 SSE 输出。客户端断线重连时可发送标准
-`Last-Event-ID` 请求头，也可使用 `after_id` 查询参数；后者同时存在时优先。心跳为
-不落库的 SSE 注释，已提交的业务事件以 SQLite 自增 ID 重放。
-
-推理流统一使用 `reasoning.started`、`reasoning.delta` 和 `reasoning.done`。系统可捕获
-Responses 的 `reasoning_text`/`reasoning_summary_text`、兼容 Chat 接口的
-`reasoning_content`，以及正文开头跨 chunk 的 `<think>...</think>`。`source` 标识来源，
-`content_type` 区分 `raw`、`summary` 和 `activity`。模型没有返回可见推理文本时不会伪造。
-推理事件和正文事件先批量写入 SQLite，再由独立 SSE 读取器重放。
-
-`AgentLoop` 每次从当前 Session 重建 Context，消费 LLM 流并在“最终答案”或“单个工具
-调用”之间作出严格决策；工具结果会持久化并进入下一步 Context。Run 默认最多 8 个模型
-步骤、总时限 60 秒。`RunSupervisor` 持有后台任务强引用，并在关闭或进程重启恢复时把
-未完成 Run 转为可重放的持久化失败终态。
-
-## 通用真实模型测试
-
-真实测试使用当前 `.env` 选择的模型和 API 风格，不绑定某个供应商。测试默认跳过，避免
-普通测试意外产生费用。把 Key 仅放入本地 `.env` 或当前进程环境：
-
-```powershell
-$env:LLM_API_KEY="你的 Key"
-$env:LLM_MODEL="供应商模型名"
-$env:LLM_BASE_URL="兼容服务地址；官方 OpenAI 可不设"
-$env:LLM_API_STYLE="responses"
-$env:RUN_LIVE_LLM_TESTS="1"
-$env:LIVE_TEST_PROFILE="smoke"
-$env:LIVE_MAX_LLM_CALLS="1"
-.venv\Scripts\python -m pytest -m live tests\live\test_llm_live.py -ra
+```text
+Vue / HTTP Client
+        │
+        ▼
+FastAPI ──创建 Session、Message、Run；提供查询与 SSE
+        │
+        ▼
+RunSupervisor ──管理后台 Run
+        │
+        ▼
+AgentLoop（最多 8 步）
+   ├─ ContextBuilder：从 SQLite 重建当前 Session 上下文
+   ├─ LLM Adapter：Responses / Chat Completions 流式适配
+   └─ ToolRegistry：calculator、search、weather、订单 CRUD
+        │
+        ▼
+SQLite：sessions(summary) / messages / runs / tool invocations / events / traces
 ```
 
-`smoke` 最多调用一次。`full` 验证 calculator、search、Mock Open-Meteo weather、真实
-摘要压缩和 reasoning，全局默认最多 8 次 LLM 调用：
+### AgentLoop：ReAct 循环
 
-```powershell
-$env:LIVE_TEST_PROFILE="full"
-$env:LIVE_MAX_LLM_CALLS="8"
-$env:LIVE_MAX_OUTPUT_TOKENS="1024"
-$env:LIVE_EXPECT_REASONING="raw" # raw | summary | activity | none
-$env:LIVE_EXPECT_REASONING_SOURCE="either" # structured | tagged | either
-.venv\Scripts\python -m pytest -m live tests\live\test_llm_live.py -ra
+![AgentLoop ReAct 循环](docs/agentloop.svg)
+
+编号 ①-⑦ 对应 `agent/loop.py` 的执行路径：每回合先由 `ContextBuilder` 装配上下文，再让
+LLM 流式输出并由 `StepAccumulator` 汇总出唯一决策；工具调用经 `DurableToolExecutor`
+持久化执行后回填结果进入下一回合（最多 8 步），最终答案与 Run 终态在同一事务内提交；
+所有回合的事件经 `BufferedEventWriter` 批量落库后由 SSE 推送。
+
+- SQLite 是会话和事件的唯一真源，不依赖远端 `previous_response_id`。
+- 每个模型步骤只能产生一个工具调用或一个最终回答；工具结果进入下一步 Context。
+- 模型正文、可见推理和工具事件先持久化，再由 SSE 读取；断线可从事件 ID 续传。
+- 工具调用先固定参数和幂等键，再按 `safe / with_idempotency_key / never` 语义处理超时重试。
+- 同一 Session 同时最多一个 running Run，不同 Session 可以并行。
+
+## Memory：召回时机与放置方式
+
+### 何时召回
+
+`ContextBuilder.prepare()` 在**每次调用 LLM 之前**执行：首次回答前会执行，工具完成后的
+下一步也会再次执行。它只读取当前 Session 的 SQLite 数据，不会召回其他 Session。
+
+每次召回后都会估算输入 token：
+
+- 低于模型上下文窗口的 80%：不生成新摘要，直接使用已有摘要和后续原始消息。
+- 达到 80%：把可安全压缩的、已经完成的旧轮次合并进摘要；最近 5 个完整轮次和当前
+  未完成 Run 保留原文。
+- 摘要后仍达到阈值，或没有可压缩轮次：Run 以 `CONTEXT_LIMIT_EXCEEDED` 失败。
+
+![召回时机与压缩判定](docs/memory-recall-timing.svg)
+
+### 放到哪里
+
+发给模型的内容按以下位置组织：
+
+```text
+LLMRequest.instructions = system prompt + 当前回合的 @工具指令（如有）
+LLMRequest.tools        = 本回合可用工具 Schema
+LLMRequest.input[0]     = Session summary（存在时，以 system 消息放置）
+LLMRequest.input[1..]   = summary_through_seq 之后的原始消息，按 seq 排序
+                         （user / assistant / tool call / tool result）
 ```
 
-full profile 的默认单次输出上限是 1024 tokens；可按模型和成本预算显式调低，但过低可能
-把正常的详细工具回答判定为 `LLM_RESPONSE_INCOMPLETE`。其中只有 LLM 是真实远端调用；
-天气 HTTP 使用确定性 Mock，避免第三方天气服务
-波动污染模型工具调用验收。不要把真实 Key 写入 `.env.example`、测试文件、Trace 或提交
-记录。`LIVE_EXPECT_REASONING=none` 表示不要求模型返回可见推理，不会把隐藏 token 当成
-测试失败。
+摘要正文和覆盖范围保存在 `sessions.summary`、`summary_from_seq`、
+`summary_through_seq`；原始 `messages` 不会因摘要而删除。用于展示的 `reasoning.*`
+事件保存在 `stream_events`，Trace 只用于诊断，二者都不作为 Session Memory 召回；
+工具调用所需的供应商续传元数据仍会随对应 tool call 保留，供紧接着的模型步骤继续使用。
 
-## 质量检查
+![放置方式](docs/memory-placement.svg)
+
+## 架构题：LLM 输出是非确定性的，工具调用可能超时。重试一次工具调用时，怎么保证不产生副作用（比如重复下单）？如何让 agent 框架感知"这个工具是幂等的"？
+
+LLM 输出是非确定性的，所以工具调用超时后，不能让 LLM 再生成一次调用，否则工具参数可能变化。Agent 框架应在第一次调用前保存工具名、参数和调用 ID；重试时直接重放这次调用。对于下单等会产生副作用的工具，框架还要传入同一个幂等键，由订单服务根据该键保证多次请求只创建一笔订单，并在重复请求时返回第一次的结果。这样即使第一次调用已经成功、只是响应超时，重试也不会重复下单。执行器设置的截止时间和 handler 自身报告的超时都按“结果未知”处理，不能把业务提交后的响应丢失降级成普通工具失败。为了让框架知道如何处理，可以在注册工具时声明它的幂等能力和重试策略：查询等可安全重复执行的工具可以直接重试；下单等依赖幂等键的工具只能携带原键和原参数重试；不支持幂等的工具在超时后不能盲目重试，应先查询是否执行成功，无法确认时停止自动重试。
+
+![订单工具超时幂等重试 · 调用链与状态流转](docs/order-idempotent-retry.svg)
+
+测试该功能文件位置
+tests/unit/test_tool_executor.py
+执行器重试策略：SAFE 超时重试一次、WITH_IDEMPOTENCY_KEY 复用同一逻辑调用、NEVER 不重试、两次 unknown 终止
+tests/unit/test_orders.py
+订单 repository 幂等：相同 key 重放返回原记录、不同请求同 key 抛冲突、版本并发冲突
+tests/unit/tools/test_orders.py
+订单工具层：handler 正确传递幂等键、冲突错误转换
+tests/integration/test_tool_recovery.py
+进程重启恢复：业务已提交但进程未记录结果时，重建服务图后复用同一幂等键不重复下单
+tests/integration/tools/test_agent_orders.py
+Agent 端到端：连续两次订单调用结果未知时 Agent 停止
+
+
+
+## aicoding文件位置（"aicoding/agent框架搭建.md"）
+
+
+
+
+## 测试覆盖
+
+当前共 29 个测试文件；默认测试不调用付费 LLM。主要覆盖：
+
+- **Agent 核心**（`test_context.py`、`test_agent_loop.py`）：Session 隔离、Context 重建与
+  摘要压缩、工具回放、多步 ReAct、推理持久化、错误终止，以及 Supervisor 恢复与清理。
+- **LLM 适配**（`tests/unit/llm/`）：Responses/Chat Completions 流映射、推理与
+  `<think>` 解析、工具参数组装、模型窗口发现与缓存、有限重试和中断流保护。
+- **工具系统**（`test_tool_registry.py`、`test_tool_executor.py`、`tests/unit/tools/`）：严格
+  Schema、参数校验、同步/异步执行、超时与幂等恢复，以及 calculator/search/weather/订单。
+- **SQLite 持久化**（`test_database.py`、`test_repositories.py`、`test_orders.py`、
+  `test_tool_invocations.py`）：事务回滚、消息序列与隔离、Run/事件原子提交、订单幂等与
+  乐观锁、工具调用边界原子性。
+- **事件流**（`test_streaming.py`、`test_reasoning_history.py`）：8 KiB/100 ms 缓冲、delta
+  合并、屏障刷新、SSE 重放与心跳、断线隔离和历史推理重建。
+- **HTTP API**（`tests/integration/test_api.py`、`test_orders_api.py`、`test_sse.py`，以及根目录
+  `test_health.py`）：完整请求链路、稳定错误、并发约束、重启恢复、OpenAPI 和订单 CRUD。
+- **Agent 工具端到端**（`tests/integration/tools/test_agent_*.py`、
+  `tests/integration/test_tool_recovery.py`）：工具结果持久化并回传模型、订单完整 CRUD、
+  超时不重复写入，以及重建服务后的同调用恢复。
+- **契约与真实模型**（`test_tool_contracts.py`、`test_llm_live.py`）：所有注册工具的 Schema、
+  副作用/重试声明和测试模块契约；真实模型 smoke/full 流程默认跳过，仅显式开启时运行。
+
+## 文档与验证
+
+- 完整设计：[`docs/design.md`](docs/design.md)
+- 部署与故障排查：[`docs/operations.md`](docs/operations.md)
+- 当前进度：[`docs/progress.md`](docs/progress.md)
+- 项目协作约束：[`AGENTS.md`](AGENTS.md)
 
 ```powershell
-.venv\Scripts\python -m pytest
+.venv\Scripts\python -m pytest -ra
 .venv\Scripts\python -m ruff check .
 .venv\Scripts\python -m ruff format --check .
 .venv\Scripts\python -m build
 ```
-
-MVP 运行约束：单进程、单 Uvicorn worker。原因是 RunSupervisor 和事件通知器是
-进程内组件；多进程部署需要外部任务队列和跨进程通知，不属于当前范围。
 

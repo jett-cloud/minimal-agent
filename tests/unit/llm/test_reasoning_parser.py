@@ -26,6 +26,7 @@ async def _events(script, **settings):
 
 @pytest.mark.asyncio
 async def test_think_tag_is_parsed_across_chunks_and_removed_from_answer() -> None:
+    # 验证跨分块解析 think 标签并从回答中移除。
     raw = "<think>plan carefully</think>final answer"
     events = await _events(
         [
@@ -52,6 +53,7 @@ async def test_think_tag_is_parsed_across_chunks_and_removed_from_answer() -> No
 
 @pytest.mark.asyncio
 async def test_literal_think_tag_after_answer_is_not_parsed() -> None:
+    # 验证回答后的字面 think 标签不会被误解析。
     text = "Example: <think>literal</think>"
     events = await _events(
         [
@@ -67,6 +69,7 @@ async def test_literal_think_tag_after_answer_is_not_parsed() -> None:
 
 @pytest.mark.asyncio
 async def test_auto_capture_keeps_first_reasoning_source_without_duplicate() -> None:
+    # 验证自动捕获只保留首个推理来源且不重复。
     raw = "<think>tag duplicate</think>answer"
     events = await _events(
         [
@@ -99,6 +102,7 @@ async def test_auto_capture_keeps_first_reasoning_source_without_duplicate() -> 
 
 @pytest.mark.asyncio
 async def test_both_capture_emits_structured_and_tagged_reasoning() -> None:
+    # 验证双通道捕获同时输出结构化和标签推理。
     raw = "<think>tagged</think>answer"
     events = await _events(
         [
@@ -125,6 +129,7 @@ async def test_both_capture_emits_structured_and_tagged_reasoning() -> None:
 
 @pytest.mark.asyncio
 async def test_unclosed_think_tag_becomes_incomplete_response() -> None:
+    # 验证未闭合 think 标签会形成不完整响应。
     raw = "<think>unfinished"
     events = await _events(
         [
@@ -143,6 +148,7 @@ async def test_unclosed_think_tag_becomes_incomplete_response() -> None:
 
 @pytest.mark.asyncio
 async def test_reasoning_output_off_still_removes_think_text_from_answer() -> None:
+    # 验证关闭推理输出后仍从回答移除 think 内容。
     raw = "<think>hidden by configuration</think>visible"
     events = await _events(
         [
@@ -161,6 +167,7 @@ async def test_reasoning_output_off_still_removes_think_text_from_answer() -> No
 
 @pytest.mark.asyncio
 async def test_lifecycle_only_reasoning_gets_a_matching_done_event() -> None:
+    # 验证仅有生命周期的推理也会获得匹配的完成事件。
     events = await _events(
         [
             ReasoningStarted(item_id="reason1"),

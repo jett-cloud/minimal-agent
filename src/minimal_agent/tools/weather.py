@@ -6,7 +6,12 @@ from typing import Annotated, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from minimal_agent.tools.base import ToolDefinition, ToolExecutionError, ToolSideEffect
+from minimal_agent.tools.base import (
+    ToolDefinition,
+    ToolExecutionError,
+    ToolRetrySemantics,
+    ToolSideEffect,
+)
 
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
@@ -373,7 +378,7 @@ def _format_result(
 def create_weather_tool(
     http_client: httpx.AsyncClient,
     *,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float | None = None,
 ) -> ToolDefinition[WeatherArguments]:
     """Create a registry-compatible weather tool around an injected HTTP client."""
 
@@ -389,6 +394,7 @@ def create_weather_tool(
         handler=client.get_weather,
         timeout_seconds=timeout_seconds,
         side_effect=ToolSideEffect.READ,
+        retry_semantics=ToolRetrySemantics.SAFE,
     )
 
 

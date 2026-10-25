@@ -6,6 +6,7 @@ from minimal_agent.storage import Database
 
 
 def test_database_initializes_schema_and_connection_pragmas(database: Database) -> None:
+    # 验证数据库初始化 Schema 和连接 PRAGMA。
     database.initialize()
     with database.connection() as connection:
         tables = {
@@ -19,14 +20,24 @@ def test_database_initializes_schema_and_connection_pragmas(database: Database) 
         busy_timeout = connection.execute("PRAGMA busy_timeout").fetchone()[0]
         schema_versions = connection.execute("SELECT version FROM schema_meta").fetchall()
 
-    assert {"sessions", "messages", "runs", "traces", "stream_events"} <= tables
+    assert {
+        "sessions",
+        "messages",
+        "runs",
+        "traces",
+        "stream_events",
+        "orders",
+        "order_operations",
+        "tool_invocations",
+    } <= tables
     assert foreign_keys == 1
     assert journal_mode == "wal"
     assert busy_timeout == 5000
-    assert [row[0] for row in schema_versions] == [1]
+    assert [row[0] for row in schema_versions] == [1, 2, 3]
 
 
 def test_foreign_keys_are_enforced(database: Database) -> None:
+    # 验证数据库强制执行外键约束。
     with pytest.raises(sqlite3.IntegrityError), database.transaction() as connection:
         connection.execute(
             """
@@ -38,6 +49,7 @@ def test_foreign_keys_are_enforced(database: Database) -> None:
 
 
 def test_transaction_rolls_back_on_error(database: Database) -> None:
+    # 验证事务遇到错误时回滚。
     with pytest.raises(RuntimeError, match="stop"), database.transaction() as connection:
         connection.execute(
             """

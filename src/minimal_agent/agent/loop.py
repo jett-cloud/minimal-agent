@@ -18,11 +18,12 @@ from minimal_agent.llm import (
     ResponseStarted,
     is_terminal_event,
 )
-from minimal_agent.schemas import MessageKind, MessageRole, RunRecord, RunStatus
+from minimal_agent.schemas import RunRecord, RunStatus, ToolInvocationRecord, ToolInvocationStatus
 from minimal_agent.storage import (
     MessageRepository,
     RunRepository,
     StreamEventRepository,
+    ToolInvocationRepository,
     TraceRepository,
 )
 from minimal_agent.streaming import (
@@ -33,11 +34,13 @@ from minimal_agent.streaming import (
     ToolCallReadyEvent,
     ToolCompletedEvent,
     ToolFailedEvent,
+    ToolRetryingEvent,
     ToolStartedEvent,
+    ToolUnknownEvent,
     TurnCompletedEvent,
     TurnStartedEvent,
 )
-from minimal_agent.tools import ToolRegistry
+from minimal_agent.tools import DurableToolExecutor, ToolRegistry, ToolResultUnknownError
 
 _MAX_ERROR_MESSAGE_LENGTH = 1000
 
@@ -60,24 +63,26 @@ class AgentLoop:
         traces: TraceRepository,
         stream_events: StreamEventRepository,
         publisher: EventPublisher,
+        tool_executor: DurableToolExecutor | None = None,
         max_steps: int = 8,
-        run_timeout_seconds: float = 60.0,
         stream_flush_bytes: int = 8192,
         stream_flush_interval_seconds: float = 0.1,
         stream_queue_maxsize: int = 256,
     ) -> None:
-        if max_steps < 1 or run_timeout_seconds <= 0:
-            raise ValueError("Agent limits must be positive")
+        if max_steps < 1:
+            raise ValueError("Agent max steps must be positive")
         self._llm = llm
         self._context = context
         self._tools = tools
+        self._tool_executor = tool_executor or DurableToolExecutor(
+            tools, ToolInvocationRepository(messages.database)
+        )
         self._messages = messages
         self._runs = runs
         self._traces = traces
         self._stream_events = stream_events
         self._publisher = publisher
         self._max_steps = max_steps
-        self._run_timeout_seconds = run_timeout_seconds
         self._stream_flush_bytes = stream_flush_bytes
         self._stream_flush_interval_seconds = stream_flush_interval_seconds
         self._stream_queue_maxsize = stream_queue_maxsize
@@ -104,17 +109,8 @@ class AgentLoop:
 
         terminal: RunRecord | None = None
         try:
-            async with asyncio.timeout(self._run_timeout_seconds):
-                outcome = await self._run_steps(run, writer)
+            outcome = await self._run_steps(run, writer)
             terminal = await self._commit_final_answer(outcome)
-        except TimeoutError:
-            terminal = await self._fail_run(
-                run.id,
-                writer,
-                code="RUN_TIMEOUT",
-                message=f"Agent exceeded the {self._run_timeout_seconds:g} second time limit",
-                exception_type="TimeoutError",
-            )
         except asyncio.CancelledError:
             await asyncio.shield(
                 self._fail_run(
@@ -152,12 +148,95 @@ class AgentLoop:
             raise RuntimeError("AgentLoop exited without a terminal Run")
         return terminal
 
+    async def can_resume(self, run_id: str) -> bool:
+        run = await asyncio.to_thread(self._runs.require, run_id)
+        if run.status is not RunStatus.RUNNING:
+            return False
+        invocation = await asyncio.to_thread(self._tool_executor.invocations.latest_for_run, run_id)
+        return invocation is not None and invocation.step_no == run.loop_count
+
+    async def resume(self, run_id: str) -> RunRecord:
+        run = await asyncio.to_thread(self._runs.require, run_id)
+        if run.status is not RunStatus.RUNNING:
+            raise AgentLoopError("RUN_NOT_RUNNING", f"Run is not running: {run_id}")
+        invocation = await asyncio.to_thread(self._tool_executor.invocations.latest_for_run, run_id)
+        if invocation is None or invocation.step_no != run.loop_count:
+            raise AgentLoopError("RUN_NOT_RESUMABLE", "Run has no durable tool boundary")
+        writer = self._create_writer(run_id)
+        terminal: RunRecord | None = None
+        try:
+            await self._trace(
+                run.id,
+                step_no=run.loop_count,
+                event_type="run.resumed",
+                payload={"invocation_id": invocation.id},
+            )
+            if invocation.status in (
+                ToolInvocationStatus.PENDING,
+                ToolInvocationStatus.UNKNOWN,
+            ):
+                await self._resume_tool_call(invocation, writer)
+            turn_completed = await asyncio.to_thread(
+                self._turn_completed_exists, run.id, run.loop_count
+            )
+            if not turn_completed:
+                await writer.publish(
+                    TurnCompletedEvent(run_id=run.id, step_no=run.loop_count, outcome="tool_call")
+                )
+                await self._trace(
+                    run.id,
+                    step_no=run.loop_count,
+                    event_type="turn.completed",
+                    payload={"outcome": "tool_call", "recovered": True},
+                )
+            outcome = await self._run_steps(run, writer)
+            terminal = await self._commit_final_answer(outcome)
+        except asyncio.CancelledError:
+            await asyncio.shield(
+                self._fail_run(
+                    run.id,
+                    writer,
+                    code="RUN_CANCELLED",
+                    message="Agent task was cancelled before completion",
+                    exception_type="CancelledError",
+                )
+            )
+            raise
+        except Exception as error:
+            code, message = _normalize_error(error)
+            terminal = await self._fail_run(
+                run.id,
+                writer,
+                code=code,
+                message=message,
+                exception_type=type(error).__name__,
+            )
+        finally:
+            await writer.close()
+        if terminal is None:
+            raise RuntimeError("AgentLoop resume exited without a terminal Run")
+        return terminal
+
+    def _create_writer(self, run_id: str) -> BufferedEventWriter:
+        return BufferedEventWriter(
+            run_id,
+            store=self._stream_events,
+            publisher=self._publisher,
+            flush_bytes=self._stream_flush_bytes,
+            flush_interval_seconds=self._stream_flush_interval_seconds,
+            queue_maxsize=self._stream_queue_maxsize,
+        )
+
+    def _turn_completed_exists(self, run_id: str, step_no: int) -> bool:
+        events = self._stream_events.list_by_event_types(run_id, ("turn.completed",))
+        return any(event.payload.get("step_no") == step_no for event in events)
+
     async def _run_steps(
         self,
         initial_run: RunRecord,
         writer: BufferedEventWriter,
     ) -> _FinalOutcome:
-        for step_no in range(1, self._max_steps + 1):
+        for step_no in range(initial_run.loop_count + 1, self._max_steps + 1):
             run = await asyncio.to_thread(self._runs.increment_loop, initial_run.id)
             await writer.publish(TurnStartedEvent(run_id=run.id, step_no=step_no))
             await self._trace(
@@ -244,13 +323,14 @@ class AgentLoop:
         decision: ToolCallDecision,
         writer: BufferedEventWriter,
     ) -> None:
-        await asyncio.to_thread(
-            self._messages.append,
-            run.session_id,
+        prepared = await self._tool_executor.prepare(
             run_id=run.id,
-            role=MessageRole.ASSISTANT,
-            kind=MessageKind.TOOL_CALL,
-            content={
+            session_id=run.session_id,
+            step_no=step_no,
+            provider_call_id=decision.call_id,
+            tool_name=decision.name,
+            arguments_json=decision.arguments_json,
+            tool_call_content={
                 "call_id": decision.call_id,
                 "name": decision.name,
                 "arguments": decision.arguments_json,
@@ -269,27 +349,14 @@ class AgentLoop:
                     source_seq=decision.source_seq,
                 )
             )
-            await writer.publish(
-                ToolStartedEvent(
-                    call_id=decision.call_id,
-                    name=decision.name,
-                    arguments=arguments,
-                )
-            )
-            tool_started = monotonic()
-            result = await self._tools.execute(decision.name, arguments)
-        else:
-            tool_started = monotonic()
-            result = await self._tools.execute_json(decision.name, decision.arguments_json)
-
-        await asyncio.to_thread(
-            self._messages.append,
-            run.session_id,
-            run_id=run.id,
-            role=MessageRole.TOOL,
-            kind=MessageKind.TOOL_RESULT,
-            content={"call_id": decision.call_id, "result": result.model_dump(mode="json")},
+        tool_started = monotonic()
+        outcome = await self._tool_executor.execute(
+            prepared,
+            on_attempt=self._attempt_callback(writer, arguments or {}),
+            on_retry=self._retry_callback(writer),
+            on_unknown=self._unknown_callback(writer),
         )
+        result = outcome.result
         duration_ms = _elapsed_ms(tool_started)
         if result.ok:
             await writer.publish(
@@ -301,8 +368,10 @@ class AgentLoop:
             )
             trace_payload: dict[str, Any] = {
                 "call_id": decision.call_id,
+                "invocation_id": outcome.invocation.id,
                 "tool_name": decision.name,
                 "ok": True,
+                "attempt_count": outcome.invocation.attempt_count,
             }
             trace_type = "tool.completed"
         else:
@@ -317,9 +386,11 @@ class AgentLoop:
             )
             trace_payload = {
                 "call_id": decision.call_id,
+                "invocation_id": outcome.invocation.id,
                 "tool_name": decision.name,
                 "ok": False,
                 "error": result.error.model_dump(mode="json"),
+                "attempt_count": outcome.invocation.attempt_count,
             }
             trace_type = "tool.failed"
         await self._trace(
@@ -329,6 +400,111 @@ class AgentLoop:
             payload=trace_payload,
             duration_ms=duration_ms,
         )
+
+    async def _resume_tool_call(
+        self, invocation: ToolInvocationRecord, writer: BufferedEventWriter
+    ) -> None:
+        arguments = _parse_arguments(invocation.arguments_json) or {}
+        outcome = await self._tool_executor.resume(
+            invocation.id,
+            on_attempt=self._attempt_callback(writer, arguments),
+            on_retry=self._retry_callback(writer),
+            on_unknown=self._unknown_callback(writer),
+        )
+        result = outcome.result
+        if result.ok:
+            await writer.publish(
+                ToolCompletedEvent(
+                    call_id=invocation.provider_call_id,
+                    name=invocation.tool_name,
+                    result=result.data,
+                )
+            )
+        else:
+            if result.error is None:
+                raise RuntimeError("Failed ToolResult has no error")
+            await writer.publish(
+                ToolFailedEvent(
+                    call_id=invocation.provider_call_id,
+                    name=invocation.tool_name,
+                    error=result.error.model_dump(mode="json"),
+                )
+            )
+
+    def _attempt_callback(self, writer: BufferedEventWriter, arguments: dict[str, Any]) -> Any:
+        async def callback(invocation: ToolInvocationRecord) -> None:
+            await writer.publish(
+                ToolStartedEvent(
+                    call_id=invocation.provider_call_id,
+                    name=invocation.tool_name,
+                    arguments=arguments,
+                    invocation_id=invocation.id,
+                    attempt_no=invocation.attempt_count,
+                )
+            )
+            await self._trace(
+                invocation.run_id,
+                step_no=invocation.step_no,
+                event_type="tool.started",
+                payload={
+                    "invocation_id": invocation.id,
+                    "call_id": invocation.provider_call_id,
+                    "tool_name": invocation.tool_name,
+                    "attempt_no": invocation.attempt_count,
+                },
+            )
+
+        return callback
+
+    def _retry_callback(self, writer: BufferedEventWriter) -> Any:
+        async def callback(invocation: ToolInvocationRecord) -> None:
+            await writer.publish(
+                ToolRetryingEvent(
+                    call_id=invocation.provider_call_id,
+                    name=invocation.tool_name,
+                    invocation_id=invocation.id,
+                    next_attempt_no=invocation.attempt_count + 1,
+                )
+            )
+            await self._trace(
+                invocation.run_id,
+                step_no=invocation.step_no,
+                event_type="tool.retrying",
+                payload={
+                    "invocation_id": invocation.id,
+                    "call_id": invocation.provider_call_id,
+                    "tool_name": invocation.tool_name,
+                    "next_attempt_no": invocation.attempt_count + 1,
+                },
+            )
+
+        return callback
+
+    def _unknown_callback(self, writer: BufferedEventWriter) -> Any:
+        async def callback(invocation: ToolInvocationRecord) -> None:
+            await writer.publish(
+                ToolUnknownEvent(
+                    call_id=invocation.provider_call_id,
+                    name=invocation.tool_name,
+                    invocation_id=invocation.id,
+                    attempt_no=invocation.attempt_count,
+                    error=invocation.error or {},
+                )
+            )
+            await self._trace(
+                invocation.run_id,
+                step_no=invocation.step_no,
+                event_type="tool.unknown",
+                payload={
+                    "invocation_id": invocation.id,
+                    "call_id": invocation.provider_call_id,
+                    "tool_name": invocation.tool_name,
+                    "attempt_no": invocation.attempt_count,
+                    "error": invocation.error or {},
+                },
+            )
+
+        return callback
 
     async def _prepare_final_answer(
         self,
@@ -433,6 +609,8 @@ def _elapsed_ms(started: float) -> int:
 
 
 def _normalize_error(error: Exception) -> tuple[str, str]:
+    if isinstance(error, ToolResultUnknownError):
+        return error.code, error.message
     if isinstance(error, (AgentLoopError, LLMError)):
         return error.code, error.message
     if isinstance(error, (ContextLimitExceeded, ContextDataError, ContextCompressionError)):

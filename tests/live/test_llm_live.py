@@ -36,15 +36,17 @@ _ROOT = Path(__file__).resolve().parents[2]
 
 
 class _CallBudgetLLM:
-    def __init__(self, inner: LLMClient, *, maximum: int) -> None:
+    def __init__(self, inner: LLMClient, *, maximum: int, max_output_tokens: int) -> None:
         self.inner = inner
         self.maximum = maximum
+        self.max_output_tokens = max_output_tokens
         self.calls = 0
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMEvent]:
         self.calls += 1
         if self.calls > self.maximum:
             raise AssertionError(f"live LLM call budget exceeded: {self.calls}>{self.maximum}")
+        request = request.model_copy(update={"max_output_tokens": self.max_output_tokens})
         async for event in self.inner.stream(request):
             yield event
 
@@ -61,7 +63,12 @@ def _require_live_profile(profile: str) -> Settings:
     return settings
 
 
-def _live_client(settings: Settings, *, budget: int) -> tuple[Any, _CallBudgetLLM]:
+def _live_client(
+    settings: Settings,
+    *,
+    budget: int,
+    max_output_tokens: int,
+) -> tuple[Any, _CallBudgetLLM]:
     assert settings.llm_api_key is not None
     assert settings.llm_model is not None
     sdk = create_openai_sdk_client(
@@ -75,7 +82,6 @@ def _live_client(settings: Settings, *, budget: int) -> tuple[Any, _CallBudgetLL
     adapter = adapter_type(
         sdk,
         model=settings.llm_model,
-        timeout_seconds=settings.llm_timeout_seconds,
         retry_policy=RetryPolicy(max_retries=settings.llm_max_retries),
     )
     reasoning = ReasoningAwareLLM(
@@ -85,16 +91,21 @@ def _live_client(settings: Settings, *, budget: int) -> tuple[Any, _CallBudgetLL
         think_tag_enabled=settings.llm_think_tag_enabled,
         think_tag_name=settings.llm_think_tag_name,
     )
-    return sdk, _CallBudgetLLM(reasoning, maximum=budget)
+    return sdk, _CallBudgetLLM(
+        reasoning,
+        maximum=budget,
+        max_output_tokens=max_output_tokens,
+    )
 
 
 @pytest.mark.live
 @pytest.mark.asyncio
 async def test_configured_model_smoke_live() -> None:
+    # 验证已配置模型的真实冒烟调用。
     settings = _require_live_profile("smoke")
     budget = int(os.getenv("LIVE_MAX_LLM_CALLS", "1"))
     output_limit = int(os.getenv("LIVE_MAX_OUTPUT_TOKENS", "64"))
-    sdk, llm = _live_client(settings, budget=budget)
+    sdk, llm = _live_client(settings, budget=budget, max_output_tokens=output_limit)
     try:
         events = [
             event
@@ -102,7 +113,6 @@ async def test_configured_model_smoke_live() -> None:
                 LLMRequest(
                     instructions="Reply with exactly the word pong.",
                     input=[{"role": "user", "content": "ping"}],
-                    max_output_tokens=min(settings.llm_max_output_tokens, output_limit),
                     reasoning_effort=settings.llm_reasoning_effort,
                     reasoning_summary=settings.llm_reasoning_summary,
                 )
@@ -120,18 +130,18 @@ async def test_configured_model_smoke_live() -> None:
 @pytest.mark.live
 @pytest.mark.asyncio
 async def test_configured_model_tools_compression_reasoning_full_live(tmp_path: Path) -> None:
+    # 验证真实模型的工具、压缩和推理完整流程。
     base = _require_live_profile("full")
     budget = int(os.getenv("LIVE_MAX_LLM_CALLS", "8"))
     output_limit = int(os.getenv("LIVE_MAX_OUTPUT_TOKENS", "1024"))
     settings = base.model_copy(
         update={
             "database_path": tmp_path / "live.db",
-            "context_window_tokens": 2_500,
-            "llm_max_output_tokens": min(base.llm_max_output_tokens, output_limit),
+            "injected_llm_context_window_tokens": 2_500,
             "agent_shutdown_grace_seconds": 0,
         }
     )
-    sdk, llm = _live_client(settings, budget=budget)
+    sdk, llm = _live_client(settings, budget=budget, max_output_tokens=output_limit)
     expect_tools = os.getenv("LIVE_EXPECT_TOOLS", "true").casefold() == "true"
 
     def weather_handler(request: httpx.Request) -> httpx.Response:

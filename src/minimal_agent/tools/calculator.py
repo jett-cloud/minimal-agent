@@ -5,7 +5,7 @@ from decimal import Decimal, DecimalException, localcontext
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from minimal_agent.tools.base import ToolDefinition, ToolExecutionError
+from minimal_agent.tools.base import ToolDefinition, ToolExecutionError, ToolRetrySemantics
 
 _MAX_EXPRESSION_LENGTH = 512
 _MAX_AST_NODES = 128
@@ -197,4 +197,5 @@ CALCULATOR_TOOL = ToolDefinition(
     ),
     args_model=CalculatorArguments,
     handler=calculate,
+    retry_semantics=ToolRetrySemantics.SAFE,
 )

@@ -53,7 +53,7 @@ async def run_tool_scenario(
         database_path=tmp_path / f"{tool_name}.db",
         system_prompt_path=_ROOT / "prompts/system.md",
         summarize_prompt_path=_ROOT / "prompts/summarize.md",
-        context_window_tokens=10_000,
+        injected_llm_context_window_tokens=10_000,
         agent_shutdown_grace_seconds=0,
     )
     app = create_app(settings=settings, llm=llm, tools=registry)

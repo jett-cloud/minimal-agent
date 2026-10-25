@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="748" viewBox="0 0 1200 748" font-family="'Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c2410c"/>
+    </marker>
+  </defs>
+
+  <rect x="8" y="8" width="1184" height="732" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- 标题 -->
+  <text x="600" y="30" text-anchor="middle" font-size="20" font-weight="700" fill="#0f172a">订单工具超时幂等重试 · 调用链与状态流转</text>
+  <text x="600" y="52" text-anchor="middle" font-size="13" fill="#64748b">LLM 只选择工具与业务参数；框架固定调用内容并持久化幂等键，超时后复用同一调用记录重试，业务层以 order_operations 保证同键只生效一次</text>
+
+  <!-- ============ ① 调用准备 ============ -->
+  <rect x="30" y="68" width="1140" height="124" rx="10" fill="#f0fdfa" stroke="#0f766e" stroke-width="1.5"/>
+  <rect x="48" y="76" width="190" height="24" rx="6" fill="#0f766e"/>
+  <text x="143" y="92" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">① 调用准备 · executor.prepare()</text>
+
+  <rect x="60" y="110" width="210" height="62" rx="8" fill="#ffffff" stroke="#0f766e" stroke-width="1.5"/>
+  <text x="165" y="132" text-anchor="middle" font-size="14" font-weight="700" fill="#134e4a">LLM 决定调用 order_create</text>
+  <text x="165" y="154" text-anchor="middle" font-size="12.5" fill="#334155">选择工具 + 业务参数</text>
+
+  <line x1="270" y1="141" x2="306" y2="141" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="310" y="110" width="320" height="62" rx="8" fill="#ffffff" stroke="#0f766e" stroke-width="1.5"/>
+  <text x="470" y="132" text-anchor="middle" font-size="14" font-weight="700" fill="#134e4a">executor.prepare()</text>
+  <text x="470" y="154" text-anchor="middle" font-size="12.5" fill="#334155">检测 retry_semantics = WITH_IDEMPOTENCY_KEY</text>
+
+  <line x1="630" y1="141" x2="666" y2="141" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="670" y="110" width="250" height="62" rx="8" fill="#ffffff" stroke="#0f766e" stroke-width="1.5"/>
+  <text x="795" y="132" text-anchor="middle" font-size="14" font-weight="700" fill="#134e4a">生成 idempotency_key</text>
+  <text x="795" y="154" text-anchor="middle" font-size="12.5" fill="#334155">"toolop_&lt;uuid&gt;"（框架生成）</text>
+
+  <line x1="920" y1="141" x2="956" y2="141" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="960" y="110" width="180" height="62" rx="8" fill="#ffffff" stroke="#0f766e" stroke-width="1.5"/>
+  <text x="1050" y="132" text-anchor="middle" font-size="14" font-weight="700" fill="#134e4a">写入 tool_invocations</text>
+  <text x="1050" y="154" text-anchor="middle" font-size="12.5" fill="#334155">调用记录持久化</text>
+
+  <text x="60" y="182" font-size="12.5" fill="#475569">LLM 不感知幂等：键由框架生成，超时重试复用原记录与原参数，不重新询问 LLM。</text>
+
+  <!-- ============ ② 第 1 次尝试 ============ -->
+  <rect x="30" y="206" width="1140" height="344" rx="10" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+  <rect x="48" y="214" width="220" height="24" rx="6" fill="#d97706"/>
+  <text x="158" y="230" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">② 第 1 次尝试 · executor._execute()</text>
+
+  <rect x="60" y="248" width="520" height="52" rx="8" fill="#ffffff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="320" y="270" text-anchor="middle" font-size="14" font-weight="700" fill="#92400e">调用 order_create handler</text>
+  <text x="320" y="292" text-anchor="middle" font-size="12.5" fill="#334155">传入 context.idempotency_key</text>
+
+  <line x1="320" y1="300" x2="320" y2="326" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="60" y="330" width="520" height="52" rx="8" fill="#ffffff" stroke="#d97706" stroke-width="1.5"/>
+  <text x="320" y="352" text-anchor="middle" font-size="14" font-weight="700" fill="#92400e">repository.create()：先算 request_hash，再按 key 查 order_operations</text>
+  <text x="320" y="374" text-anchor="middle" font-size="12.5" fill="#334155">request_hash = sha256(业务参数) · 命中 → 重放 · 未命中 → 创建</text>
+
+  <path d="M 320 382 L 320 396 L 140 396 L 140 406" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <polygon points="140,410 200,436 140,462 80,436" fill="#fef3c7" stroke="#b45309" stroke-width="1.5"/>
+  <text x="140" y="441" text-anchor="middle" font-size="12.5" font-weight="700" fill="#92400e">有记录？</text>
+
+  <path d="M 140 462 L 140 482" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="150" y="477" font-size="11.5" fill="#16a34a">否 →</text>
+
+  <rect x="60" y="486" width="280" height="52" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="200" y="508" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">INSERT 订单 + order_operations</text>
+  <text x="200" y="530" text-anchor="middle" font-size="12.5" fill="#334155">同一事务提交 · request_hash 首次落库</text>
+
+  <path d="M 200 436 L 236 436" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="210" y="428" font-size="11.5" fill="#b45309">是 →</text>
+
+  <rect x="240" y="410" width="340" height="52" rx="8" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="410" y="432" text-anchor="middle" font-size="14" font-weight="700" fill="#475569">返回缓存结果（重放）</text>
+  <text x="410" y="454" text-anchor="middle" font-size="12.5" fill="#334155">不重复插入</text>
+
+  <rect x="660" y="248" width="480" height="52" rx="8" fill="#fef2f2" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="900" y="270" text-anchor="middle" font-size="14" font-weight="700" fill="#991b1b">调用超时 → 结果未知</text>
+  <text x="900" y="292" text-anchor="middle" font-size="12.5" fill="#334155">标记 UNKNOWN 并持久化状态</text>
+
+  <path d="M 580 274 L 656 274" fill="none" stroke="#dc2626" stroke-width="1.5" marker-end="url(#arrow-red)"/>
+  <text x="618" y="266" text-anchor="middle" font-size="11.5" fill="#dc2626">响应超时</text>
+
+  <text x="60" y="544" font-size="12.5" fill="#475569">第 1 次尝试可能已提交业务：超时只代表响应丢失，不代表事务未完成。</text>
+
+  <!-- ============ 超时 → 重试 流转 ============ -->
+  <path d="M 900 300 L 900 556" fill="none" stroke="#c2410c" stroke-width="1.5" stroke-dasharray="7 5" marker-end="url(#arrow-orange)"/>
+  <text x="906" y="574" font-size="12" fill="#c2410c">超时 → UNKNOWN → 自动重试（最多 2 次尝试）</text>
+
+  <!-- ============ ③ 第 2 次尝试 ============ -->
+  <rect x="30" y="560" width="1140" height="124" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <rect x="48" y="568" width="200" height="24" rx="6" fill="#16a34a"/>
+  <text x="148" y="584" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">③ 第 2 次尝试 · 重试</text>
+
+  <rect x="60" y="598" width="340" height="56" rx="8" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="230" y="620" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">复用同一条 tool_invocations 记录</text>
+  <text x="230" y="642" text-anchor="middle" font-size="12.5" fill="#334155">同一 idempotency_key · 原参数</text>
+
+  <line x1="400" y1="626" x2="436" y2="626" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="440" y="598" width="300" height="56" rx="8" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="590" y="620" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">再次调用 order_create handler</text>
+  <text x="590" y="642" text-anchor="middle" font-size="12.5" fill="#334155">传入相同的 key</text>
+
+  <line x1="740" y1="626" x2="776" y2="626" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="780" y="598" width="330" height="56" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="2"/>
+  <text x="945" y="620" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">有记录且 request_hash 相同 → 返回缓存结果</text>
+  <text x="945" y="642" text-anchor="middle" font-size="12.5" fill="#16a34a">重放成功 ✓（业务不重复执行）</text>
+
+  <text x="60" y="672" font-size="12.5" fill="#475569">两次尝试共用同一条逻辑调用记录：框架按 retry 声明决定是否重试，重启恢复时同样复用原记录与原键。</text>
+
+  <!-- 图例 -->
+  <rect x="60" y="704" width="12" height="12" rx="3" fill="#f0fdfa" stroke="#0f766e" stroke-width="1.2"/>
+  <text x="78" y="714" font-size="12" fill="#475569">调用准备</text>
+  <rect x="160" y="704" width="12" height="12" rx="3" fill="#fffbeb" stroke="#d97706" stroke-width="1.2"/>
+  <text x="178" y="714" font-size="12" fill="#475569">第 1 次尝试</text>
+  <rect x="270" y="704" width="12" height="12" rx="3" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.2"/>
+  <text x="288" y="714" font-size="12" fill="#475569">第 2 次尝试 / 重放成功</text>
+  <rect x="420" y="704" width="12" height="12" rx="3" fill="#fef2f2" stroke="#dc2626" stroke-width="1.2"/>
+  <text x="438" y="714" font-size="12" fill="#475569">超时 / 失败终止</text>
+  <rect x="550" y="704" width="12" height="12" rx="3" fill="#fff7ed" stroke="#c2410c" stroke-width="1.2" stroke-dasharray="3 2"/>
+  <text x="568" y="714" font-size="12" fill="#475569">超时后重试流转</text>
+  <text x="690" y="714" font-size="12" fill="#475569">灰箭头 = 正常流向 · 红箭头 = 超时 · 绿框 = 事务提交 / 重放成功</text>
+</svg>

@@ -39,16 +39,24 @@ class RunSupervisor:
         if run_id in self._tasks:
             raise RuntimeError(f"Run is already supervised: {run_id}")
         task = asyncio.create_task(self._loop.execute(run_id), name=f"agent-run:{run_id}")
+        return self._track(run_id, task)
+
+    def _track(self, run_id: str, task: asyncio.Task[RunRecord]) -> asyncio.Task[RunRecord]:
         self._tasks[run_id] = task
         task.add_done_callback(lambda completed: self._discard(run_id, completed))
         return task
 
     async def recover_interrupted(self) -> int:
-        """Fail Runs left running by a prior process and publish their durable terminals."""
+        """Resume Runs at durable tool boundaries; fail Runs without one."""
 
         interrupted = await asyncio.to_thread(self._runs.list_running)
         recovered = 0
         for run in interrupted:
+            if self._loop is not None and await self._loop.can_resume(run.id):
+                task = asyncio.create_task(self._loop.resume(run.id), name=f"agent-resume:{run.id}")
+                self._track(run.id, task)
+                recovered += 1
+                continue
             await asyncio.to_thread(
                 self._runs.fail_with_error,
                 run.id,

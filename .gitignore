@@ -11,6 +11,7 @@ build/
 *.egg-info/
 var/*.db
 var/*.db-*
+var/*.log
 frontend/node_modules/
 frontend/dist/
 

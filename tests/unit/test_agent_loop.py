@@ -28,10 +28,11 @@ from minimal_agent.storage import (
     RunRepository,
     SessionRepository,
     StreamEventRepository,
+    ToolInvocationRepository,
     TraceRepository,
 )
 from minimal_agent.streaming import EventPublisher
-from minimal_agent.tools import CALCULATOR_TOOL, ToolRegistry
+from minimal_agent.tools import CALCULATOR_TOOL, DurableToolExecutor, ToolRegistry
 
 
 class _SmallCounter:
@@ -142,7 +143,6 @@ def _make_loop(
     *,
     tools: ToolRegistry | None = None,
     max_steps: int = 8,
-    timeout: float = 2,
     counter: object | None = None,
     context_window: int = 10_000,
 ) -> tuple[
@@ -168,7 +168,6 @@ def _make_loop(
         stream_events=events,
         publisher=EventPublisher(),
         max_steps=max_steps,
-        run_timeout_seconds=timeout,
         stream_flush_interval_seconds=0.01,
     )
     assert SessionRepository(database).require(session_id).id == session_id
@@ -179,6 +178,7 @@ def _make_loop(
 async def test_agent_loop_completes_plain_answer_with_trace_and_terminal(
     database: Database,
 ) -> None:
+    # 验证 Agent 循环完成普通回答、Trace 和终态事件。
     llm = FakeLLM([_final_response("你好")])
     loop, run_id, messages, runs, traces, events = _make_loop(database, llm)
 
@@ -210,6 +210,7 @@ async def test_agent_loop_completes_plain_answer_with_trace_and_terminal(
 
 @pytest.mark.asyncio
 async def test_agent_loop_executes_tool_then_rebuilds_context(database: Database) -> None:
+    # 验证 Agent 执行工具后会重建上下文。
     llm = FakeLLM(
         [
             _tool_response('{"expression":"1+2"}'),
@@ -253,6 +254,7 @@ async def test_agent_loop_executes_tool_then_rebuilds_context(database: Database
 async def test_agent_loop_persists_reasoning_events_without_polluting_final_answer(
     database: Database,
 ) -> None:
+    # 验证推理事件持久化且不污染最终回答。
     llm = FakeLLM(
         [
             [
@@ -300,6 +302,7 @@ async def test_agent_loop_persists_reasoning_events_without_polluting_final_answ
 async def test_reasoning_continuation_and_chat_content_are_replayed_after_tool(
     database: Database,
 ) -> None:
+    # 验证工具执行后会重放推理续接项和聊天内容。
     tool_events = _tool_response('{"expression":"2+2"}')
     tool_events.insert(
         1,
@@ -337,6 +340,7 @@ async def test_reasoning_continuation_and_chat_content_are_replayed_after_tool(
 
 @pytest.mark.asyncio
 async def test_invalid_tool_arguments_are_returned_to_next_model_step(database: Database) -> None:
+    # 验证无效工具参数会返回给下一模型步骤。
     llm = FakeLLM([_tool_response("{}"), _final_response("参数不合法", suffix="2")])
     loop, run_id, messages, _, traces, events = _make_loop(
         database,
@@ -361,6 +365,7 @@ async def test_invalid_tool_arguments_are_returned_to_next_model_step(database: 
 
 @pytest.mark.asyncio
 async def test_max_steps_fails_without_infinite_loop(database: Database) -> None:
+    # 验证达到最大步数时失败且不会无限循环。
     llm = FakeLLM(
         [
             _tool_response('{"expression":"1+1"}', call_id="call_1"),
@@ -392,6 +397,7 @@ async def test_max_steps_fails_without_infinite_loop(database: Database) -> None
 async def test_parallel_tool_calls_are_rejected_even_if_provider_ignores_setting(
     database: Database,
 ) -> None:
+    # 验证供应商忽略配置时仍拒绝并行工具调用。
     llm = FakeLLM(
         [
             [
@@ -419,26 +425,10 @@ async def test_parallel_tool_calls_are_rejected_even_if_provider_ignores_setting
 
 
 @pytest.mark.asyncio
-async def test_total_run_timeout_becomes_durable_failure(database: Database) -> None:
-    llm = _HangingLLM()
-    loop, run_id, _, runs, traces, events = _make_loop(database, llm, timeout=0.2)
-
-    result = await loop.execute(run_id)
-
-    assert llm.started.is_set()
-    assert result.status is RunStatus.FAILED
-    assert result.error_code == "RUN_TIMEOUT"
-    assert runs.require(run_id).status is RunStatus.FAILED
-    assert events.list_after_id(run_id)[-1].event_type == "run.failed"
-    assert any(
-        trace.payload.get("error_code") == "RUN_TIMEOUT" for trace in traces.list_for_run(run_id)
-    )
-
-
-@pytest.mark.asyncio
 async def test_context_limit_and_llm_errors_become_traced_run_failures(
     database: Database,
 ) -> None:
+    # 验证上下文超限和 LLM 错误会形成带 Trace 的任务失败。
     unused_llm = FakeLLM([_final_response()])
     context_loop, context_run_id, _, _, context_traces, _ = _make_loop(
         database,
@@ -472,6 +462,7 @@ async def test_context_limit_and_llm_errors_become_traced_run_failures(
 
 @pytest.mark.asyncio
 async def test_supervisor_recovers_interrupted_run_with_terminal_event(database: Database) -> None:
+    # 验证监督器用终态事件恢复被中断任务。
     fake = FakeLLM([_final_response()])
     loop, run_id, _, runs, _, events = _make_loop(database, fake)
     publisher = EventPublisher()
@@ -487,7 +478,49 @@ async def test_supervisor_recovers_interrupted_run_with_terminal_event(database:
 
 
 @pytest.mark.asyncio
+async def test_supervisor_resumes_run_from_durable_tool_boundary(database: Database) -> None:
+    # 验证监督器从持久化工具边界继续任务。
+    fake = FakeLLM([_final_response()])
+    registry = ToolRegistry([CALCULATOR_TOOL])
+    loop, run_id, messages, runs, _, _ = _make_loop(database, fake, tools=registry)
+    run = runs.increment_loop(run_id)
+    invocations = ToolInvocationRepository(database)
+    executor = DurableToolExecutor(registry, invocations)
+    prepared = await executor.prepare(
+        run_id=run.id,
+        session_id=run.session_id,
+        step_no=1,
+        provider_call_id="recover-call",
+        tool_name="calculator",
+        arguments_json='{"expression":"6 * 7"}',
+        tool_call_content={
+            "call_id": "recover-call",
+            "name": "calculator",
+            "arguments": '{"expression":"6 * 7"}',
+        },
+    )
+    supervisor = RunSupervisor(loop, runs=runs, publisher=EventPublisher())
+
+    recovered = await supervisor.recover_interrupted()
+    task = supervisor._tasks[run_id]
+    result = await asyncio.wait_for(task, timeout=2)
+
+    assert recovered == 1
+    assert result.status is RunStatus.COMPLETED, (result.error_code, result.error_message)
+    invocation = invocations.require(prepared.record.id)
+    assert invocation.status.value == "succeeded"
+    tool_results = [
+        message
+        for message in messages.list_after(run.session_id)
+        if message.kind is MessageKind.TOOL_RESULT
+    ]
+    assert len(tool_results) == 1
+    assert tool_results[0].content["result"]["data"]["result"] == "42"
+
+
+@pytest.mark.asyncio
 async def test_supervisor_holds_and_cleans_tasks(database: Database) -> None:
+    # 验证监督器持有并清理后台任务。
     llm = FakeLLM([_final_response()])
     loop, run_id, _, runs, _, _ = _make_loop(database, llm)
     supervisor = RunSupervisor(loop, runs=runs, publisher=EventPublisher())
@@ -503,8 +536,9 @@ async def test_supervisor_holds_and_cleans_tasks(database: Database) -> None:
 
 @pytest.mark.asyncio
 async def test_supervisor_shutdown_cancels_and_finalizes_long_run(database: Database) -> None:
+    # 验证监督器关闭时取消并结束长任务。
     llm = _HangingLLM()
-    loop, run_id, _, runs, _, events = _make_loop(database, llm, timeout=10)
+    loop, run_id, _, runs, _, events = _make_loop(database, llm)
     supervisor = RunSupervisor(loop, runs=runs, publisher=EventPublisher())
     supervisor.start(run_id)
     await llm.started.wait()

@@ -9,6 +9,7 @@ from minimal_agent.storage import (
     Database,
     InvalidStateError,
     MessageRepository,
+    NotFoundError,
     RunRepository,
     SessionRepository,
     StreamEventRepository,
@@ -17,6 +18,7 @@ from minimal_agent.storage import (
 
 
 def test_messages_are_sequenced_and_isolated_by_session(database: Database) -> None:
+    # 验证消息按序编号且按会话隔离。
     sessions = SessionRepository(database)
     messages = MessageRepository(database)
     first = sessions.create(session_id="session_a")
@@ -47,6 +49,7 @@ def test_messages_are_sequenced_and_isolated_by_session(database: Database) -> N
 
 
 def test_concurrent_message_appends_allocate_unique_sequences(database: Database) -> None:
+    # 验证并发追加消息会分配唯一序号。
     sessions = SessionRepository(database)
     messages = MessageRepository(database)
     session = sessions.create()
@@ -67,6 +70,7 @@ def test_concurrent_message_appends_allocate_unique_sequences(database: Database
 
 
 def test_summary_coverage_must_advance_and_stay_within_messages(database: Database) -> None:
+    # 验证摘要覆盖范围必须推进且不能超出消息。
     sessions = SessionRepository(database)
     messages = MessageRepository(database)
     session = sessions.create()
@@ -111,7 +115,55 @@ def test_summary_coverage_must_advance_and_stay_within_messages(database: Databa
     assert advanced.summary_through_seq == 2
 
 
+def test_session_title_update_and_delete_cascade(database: Database) -> None:
+    # 验证会话标题更新和删除级联。
+    sessions = SessionRepository(database)
+    messages = MessageRepository(database)
+    runs = RunRepository(database)
+    traces = TraceRepository(database)
+    events = StreamEventRepository(database)
+    session = sessions.create(title="Old")
+    user_message = messages.append(
+        session.id,
+        role=MessageRole.USER,
+        kind=MessageKind.MESSAGE,
+        content={"text": "hello"},
+    )
+    run = runs.create(session.id, user_message_id=user_message.id)
+    traces.append(run.id, step_no=0, event_type="run.started", payload={})
+    events.append_batch(
+        run.id,
+        [PendingStreamEvent(event_type="run.started", payload={"run_id": run.id})],
+    )
+
+    updated = sessions.update_title(session.id, title="  New title  ")
+
+    assert updated.title == "New title"
+    with pytest.raises(ActiveRunExistsError):
+        sessions.delete(session.id)
+
+    runs.fail(run.id, error_code="TEST", error_message="done")
+    sessions.delete(session.id)
+
+    assert sessions.get(session.id) is None
+    assert messages.get(user_message.id) is None
+    assert runs.get(run.id) is None
+    assert traces.list_for_run(run.id) == []
+    assert events.list_after_id(run.id) == []
+
+
+def test_session_update_and_delete_require_existing_session(database: Database) -> None:
+    # 验证更新和删除会话要求目标存在。
+    sessions = SessionRepository(database)
+
+    with pytest.raises(NotFoundError):
+        sessions.update_title("missing", title="new")
+    with pytest.raises(NotFoundError):
+        sessions.delete("missing")
+
+
 def test_only_one_run_can_be_running_per_session(database: Database) -> None:
+    # 验证每个会话最多只有一个运行中任务。
     sessions = SessionRepository(database)
     messages = MessageRepository(database)
     runs = RunRepository(database)
@@ -142,6 +194,7 @@ def test_only_one_run_can_be_running_per_session(database: Database) -> None:
 
 
 def test_user_message_and_run_are_created_atomically(database: Database) -> None:
+    # 验证用户消息和任务原子创建。
     sessions = SessionRepository(database)
     messages = MessageRepository(database)
     runs = RunRepository(database)
@@ -160,6 +213,7 @@ def test_user_message_and_run_are_created_atomically(database: Database) -> None
 
 
 def test_run_completion_requires_its_own_assistant_message(database: Database) -> None:
+    # 验证任务完成必须关联自身的助手消息。
     sessions = SessionRepository(database)
     messages = MessageRepository(database)
     runs = RunRepository(database)
@@ -189,6 +243,7 @@ def test_run_completion_requires_its_own_assistant_message(database: Database) -
 
 
 def test_message_cannot_reference_run_from_another_session(database: Database) -> None:
+    # 验证消息不能引用其他会话的任务。
     sessions = SessionRepository(database)
     messages = MessageRepository(database)
     runs = RunRepository(database)
@@ -213,6 +268,7 @@ def test_message_cannot_reference_run_from_another_session(database: Database) -
 
 
 def test_trace_and_stream_events_are_ordered_per_run(database: Database) -> None:
+    # 验证 Trace 和流事件在任务内保持顺序。
     sessions = SessionRepository(database)
     messages = MessageRepository(database)
     runs = RunRepository(database)
@@ -258,6 +314,7 @@ def test_trace_and_stream_events_are_ordered_per_run(database: Database) -> None
 
 
 def test_startup_recovery_marks_only_running_runs_failed(database: Database) -> None:
+    # 验证启动恢复只将运行中任务标记为失败。
     sessions = SessionRepository(database)
     messages = MessageRepository(database)
     runs = RunRepository(database)
@@ -299,6 +356,7 @@ def test_startup_recovery_marks_only_running_runs_failed(database: Database) -> 
 
 
 def test_final_answer_run_and_terminal_event_commit_atomically(database: Database) -> None:
+    # 验证最终回答、任务和终态事件原子提交。
     sessions = SessionRepository(database)
     messages = MessageRepository(database)
     runs = RunRepository(database)
@@ -325,6 +383,7 @@ def test_final_answer_run_and_terminal_event_commit_atomically(database: Databas
 
 
 def test_terminal_event_insert_failure_rolls_back_answer_and_run(database: Database) -> None:
+    # 验证终态事件写入失败会回滚回答和任务。
     sessions = SessionRepository(database)
     messages = MessageRepository(database)
     runs = RunRepository(database)

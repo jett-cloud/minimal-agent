@@ -18,6 +18,8 @@ const EVENT_NAMES = [
   "tool_call.delta",
   "tool_call.ready",
   "tool.started",
+  "tool.retrying",
+  "tool.unknown",
   "tool.completed",
   "tool.failed",
   "run.completed",
@@ -28,12 +30,16 @@ const quickPrompts = [
   { label: "计算器", text: "@calculator 请计算 (128 + 72) * 3 / 5" },
   { label: "主板搜索", text: "@search 帮我找支持 Wi-Fi 6E 的 B650 Mini-ITX 主板" },
   { label: "天气", text: "@weather 查询上海当前天气和未来两天预报" },
+  { label: "创建订单", text: "@order_create 为张三创建 2 件单价 199.90 元的机械键盘订单" },
+  { label: "查询订单", text: "@order_list 列出最近的待处理订单" },
   { label: "连续工具", text: "先计算 144 的平方根，再搜索一款 B650 主板并总结结果。" },
 ]
 
 const sessions = ref([])
 const selectedSessionId = ref("")
 const messages = ref([])
+const reasoningByRun = ref({})
+const eventHistoryByRun = ref({})
 const events = ref([])
 const traces = ref([])
 const activeRun = ref(null)
@@ -43,6 +49,10 @@ const health = ref({ state: "checking", label: "检查中" })
 const loadingSessions = ref(false)
 const loadingMessages = ref(false)
 const creatingSession = ref(false)
+const editingSession = ref(false)
+const sessionTitleDraft = ref("")
+const updatingSession = ref(false)
+const deletingSession = ref(false)
 const sending = ref(false)
 const error = ref(null)
 const diagnosticsTab = ref("events")
@@ -95,6 +105,59 @@ const eventStats = computed(() => ({
   tools: events.value.filter((event) => event.type === "tool.started").length,
   total: events.value.length,
 }))
+const reasoningPlacement = computed(() => {
+  const placement = {}
+
+  function placeTurn(runId, turn, completedEventId) {
+    if (!turn) return
+    const items = (reasoningByRun.value[runId] || []).filter(
+      (item) => item.first_event_id > turn.startedEventId && item.first_event_id < completedEventId,
+    )
+    if (!items.length) return
+
+    let target
+    if (turn.callId) {
+      target = messages.value.find(
+        (message) => message.run_id === runId
+          && message.kind === "tool_call"
+          && message.content?.call_id === turn.callId,
+      )
+    } else if (turn.hasFinalAnswer) {
+      target = messages.value.find(
+        (message) => message.run_id === runId
+          && message.role === "assistant"
+          && message.kind === "message",
+      )
+    }
+    if (!target) return
+    placement[target.id] = [
+      ...(placement[target.id] || []),
+      { stepNo: turn.stepNo, startedEventId: turn.startedEventId, items },
+    ]
+  }
+
+  for (const [runId, runEvents] of Object.entries(eventHistoryByRun.value)) {
+    let turn = null
+    for (const event of runEvents) {
+      if (event.event_type === "turn.started") {
+        turn = {
+          stepNo: event.payload?.step_no,
+          startedEventId: event.id,
+          callId: null,
+          hasFinalAnswer: false,
+        }
+      } else if (turn && event.event_type === "tool_call.ready") {
+        turn.callId = event.payload?.call_id || null
+      } else if (turn && event.event_type === "assistant.done") {
+        turn.hasFinalAnswer = true
+      } else if (turn && event.event_type === "turn.completed") {
+        placeTurn(runId, turn, event.id)
+        turn = null
+      }
+    }
+  }
+  return placement
+})
 
 function formatTime(value) {
   if (!value) return "—"
@@ -122,6 +185,15 @@ function messageText(message) {
 
 function renderMarkdown(value) {
   return DOMPurify.sanitize(marked.parse(String(value || "")))
+}
+
+function reasoningBeforeMessage(message) {
+  return reasoningPlacement.value[message.id] || []
+}
+
+function reasoningLabel(item) {
+  const kind = item.content_type === "raw" ? "原始推理" : item.content_type === "summary" ? "推理摘要" : "推理活动"
+  return `${kind} · ${item.source}`
 }
 
 function toolName(message) {
@@ -157,6 +229,8 @@ function eventLabel(type) {
     "tool_call.delta": "工具参数",
     "tool_call.ready": "工具就绪",
     "tool.started": "工具开始",
+    "tool.retrying": "工具重试",
+    "tool.unknown": "工具结果未知",
     "tool.completed": "工具完成",
     "tool.failed": "工具失败",
     "run.completed": "运行完成",
@@ -225,10 +299,69 @@ async function createSession() {
   }
 }
 
+function beginSessionRename() {
+  if (!selectedSession.value) return
+  sessionTitleDraft.value = selectedSession.value.title || ""
+  editingSession.value = true
+}
+
+function cancelSessionRename() {
+  editingSession.value = false
+  sessionTitleDraft.value = ""
+}
+
+async function saveSessionTitle() {
+  const title = sessionTitleDraft.value.trim()
+  if (!selectedSession.value || !title || updatingSession.value) return
+  updatingSession.value = true
+  clearError()
+  try {
+    const updated = await api.updateSession(selectedSession.value.id, title)
+    sessions.value = sessions.value.map((session) =>
+      session.id === updated.id ? updated : session,
+    )
+    cancelSessionRename()
+  } catch (caught) {
+    setError(caught)
+  } finally {
+    updatingSession.value = false
+  }
+}
+
+async function deleteSelectedSession() {
+  const session = selectedSession.value
+  if (!session || deletingSession.value || runIsActive.value) return
+  const label = session.title || "未命名会话"
+  if (!window.confirm(`确定删除“${label}”吗？消息、运行记录、推理和 Trace 将一并删除。`)) return
+  deletingSession.value = true
+  clearError()
+  try {
+    await api.deleteSession(session.id)
+    closeStream()
+    sessions.value = sessions.value.filter((item) => item.id !== session.id)
+    selectedSessionId.value = ""
+    messages.value = []
+    reasoningByRun.value = {}
+    eventHistoryByRun.value = {}
+    events.value = []
+    traces.value = []
+    activeRun.value = null
+    cancelSessionRename()
+    if (sessions.value.length) await selectSession(sessions.value[0].id)
+  } catch (caught) {
+    setError(caught)
+  } finally {
+    deletingSession.value = false
+  }
+}
+
 async function selectSession(sessionId) {
   closeStream()
+  cancelSessionRename()
   selectedSessionId.value = sessionId
   messages.value = []
+  reasoningByRun.value = {}
+  eventHistoryByRun.value = {}
   events.value = []
   traces.value = []
   activeRun.value = null
@@ -238,12 +371,68 @@ async function selectSession(sessionId) {
   loadingMessages.value = true
   clearError()
   try {
-    messages.value = await api.listMessages(sessionId)
+    const loadedMessages = await api.listMessages(sessionId)
+    messages.value = loadedMessages
+    await loadSessionRunHistory(loadedMessages)
   } catch (caught) {
     setError(caught)
   } finally {
     loadingMessages.value = false
     await scrollMessages(true)
+  }
+}
+
+async function loadAllRunEvents(runId) {
+  const pageSize = 1000
+  const records = []
+  let afterId = 0
+  while (true) {
+    const page = await api.getEventHistory(runId, afterId, pageSize)
+    records.push(...page)
+    if (page.length < pageSize) return records
+    afterId = page.at(-1).id
+  }
+}
+
+function toDiagnosticEvent(record) {
+  return {
+    id: record.id,
+    type: record.event_type,
+    data: record.payload,
+    receivedAt: record.created_at,
+  }
+}
+
+async function loadSessionRunHistory(loadedMessages) {
+  const runIds = [...new Set(loadedMessages.map((message) => message.run_id).filter(Boolean))]
+  if (!runIds.length) return
+  const entries = await Promise.all(
+    runIds.map(async (runId) => {
+      const [reasoning, runEvents] = await Promise.all([
+        api.getReasoning(runId),
+        loadAllRunEvents(runId),
+      ])
+      return [runId, reasoning, runEvents]
+    }),
+  )
+  reasoningByRun.value = Object.fromEntries(
+    entries.map(([runId, reasoning]) => [runId, reasoning]),
+  )
+  eventHistoryByRun.value = Object.fromEntries(
+    entries.map(([runId, , runEvents]) => [runId, runEvents]),
+  )
+
+  const latestRunId = runIds.at(-1)
+  const [latestRun, latestTrace] = await Promise.all([
+    api.getRun(latestRunId),
+    api.getTrace(latestRunId),
+  ])
+  activeRun.value = latestRun
+  traces.value = latestTrace
+  const latestEvents = eventHistoryByRun.value[latestRunId] || []
+  events.value = latestEvents.map(toDiagnosticEvent)
+  if (latestRun.status === "running") {
+    connectStream(latestRunId, latestEvents.at(-1)?.id || 0)
   }
 }
 
@@ -274,9 +463,9 @@ async function submitMessage() {
   }
 }
 
-function connectStream(runId) {
+function connectStream(runId, afterId = 0) {
   closeStream()
-  const source = new EventSource(api.eventUrl(runId))
+  const source = new EventSource(api.eventUrl(runId, afterId))
   eventSource = source
 
   for (const type of EVENT_NAMES) {
@@ -287,7 +476,17 @@ function connectStream(runId) {
       } catch {
         data = { raw: rawEvent.data }
       }
-      events.value.push({ id: rawEvent.lastEventId, type, data, receivedAt: new Date().toISOString() })
+      const eventId = Number(rawEvent.lastEventId)
+      if (events.value.some((event) => Number(event.id) === eventId)) return
+      const createdAt = new Date().toISOString()
+      events.value.push({ id: eventId, type, data, receivedAt: createdAt })
+      eventHistoryByRun.value = {
+        ...eventHistoryByRun.value,
+        [runId]: [
+          ...(eventHistoryByRun.value[runId] || []),
+          { id: eventId, run_id: runId, event_type: type, payload: data, created_at: createdAt },
+        ],
+      }
       if (type === "assistant.delta" || type === "assistant.done" || type.startsWith("tool.")) {
         await scrollMessages()
       }
@@ -312,14 +511,19 @@ function connectStream(runId) {
 
 async function finishRun(runId) {
   try {
-    const [run, runTraces, runMessages] = await Promise.all([
+    const [run, runTraces, runMessages, runReasoning, runEvents] = await Promise.all([
       api.getRun(runId),
       api.getTrace(runId),
       api.listMessages(selectedSessionId.value),
+      api.getReasoning(runId),
+      loadAllRunEvents(runId),
     ])
     activeRun.value = run
     traces.value = runTraces
     messages.value = runMessages
+    reasoningByRun.value = { ...reasoningByRun.value, [runId]: runReasoning }
+    eventHistoryByRun.value = { ...eventHistoryByRun.value, [runId]: runEvents }
+    events.value = runEvents.map(toDiagnosticEvent)
     await loadSessions({ selectFirst: false })
     await checkHealth()
     await scrollMessages(true)
@@ -331,12 +535,18 @@ async function finishRun(runId) {
 async function refreshDiagnostics() {
   if (!activeRun.value?.id) return
   try {
-    const [run, runTraces] = await Promise.all([
-      api.getRun(activeRun.value.id),
-      api.getTrace(activeRun.value.id),
+    const runId = activeRun.value.id
+    const [run, runTraces, runReasoning, runEvents] = await Promise.all([
+      api.getRun(runId),
+      api.getTrace(runId),
+      api.getReasoning(runId),
+      loadAllRunEvents(runId),
     ])
     activeRun.value = run
     traces.value = runTraces
+    reasoningByRun.value = { ...reasoningByRun.value, [runId]: runReasoning }
+    eventHistoryByRun.value = { ...eventHistoryByRun.value, [runId]: runEvents }
+    events.value = runEvents.map(toDiagnosticEvent)
   } catch (caught) {
     setError(caught)
   }
@@ -449,7 +659,7 @@ onBeforeUnmount(closeStream)
           </section>
           <div v-if="!loadingSessions && !sessions.length" class="empty-sidebar">
             <span>01</span>
-            <p>还没有会话<br />从上方创建一个开始测试</p>
+            <p>还没有会话<br />从上方创建一个开始测试<br />创建后可修改标题或删除对话</p>
           </div>
         </div>
         <div class="sidebar-foot">
@@ -463,11 +673,22 @@ onBeforeUnmount(closeStream)
         <div class="conversation-head">
           <div>
             <p class="eyebrow">SESSION</p>
-            <h2>{{ selectedSession?.title || (selectedSession ? "未命名会话" : "选择一个会话") }}</h2>
+            <form v-if="editingSession" class="session-title-editor" @submit.prevent="saveSessionTitle">
+              <input v-model="sessionTitleDraft" maxlength="200" aria-label="对话标题" autofocus />
+              <button type="submit" :disabled="!sessionTitleDraft.trim() || updatingSession">保存</button>
+              <button type="button" @click="cancelSessionRename">取消</button>
+            </form>
+            <h2 v-else>{{ selectedSession?.title || (selectedSession ? "未命名会话" : "选择一个会话") }}</h2>
           </div>
-          <div v-if="selectedSession" class="session-badges">
-            <span>{{ messages.length }} 条消息</span>
-            <span v-if="selectedSession.summary_through_seq">已摘要至 #{{ selectedSession.summary_through_seq }}</span>
+          <div v-if="selectedSession" class="session-head-tools">
+            <div class="session-badges">
+              <span>{{ messages.length }} 条消息</span>
+              <span v-if="selectedSession.summary_through_seq">已摘要至 #{{ selectedSession.summary_through_seq }}</span>
+            </div>
+            <div class="session-actions">
+              <button type="button" :disabled="editingSession" @click="beginSessionRename">修改标题</button>
+              <button type="button" class="danger" :disabled="runIsActive || deletingSession" @click="deleteSelectedSession">删除对话</button>
+            </div>
           </div>
         </div>
 
@@ -494,29 +715,56 @@ onBeforeUnmount(closeStream)
               </div>
             </div>
 
-            <article v-for="message in messages" :key="message.id" class="message" :class="[message.role, message.kind]">
-              <div v-if="message.role === 'assistant' && message.kind === 'message'" class="message-avatar">✦</div>
-              <div class="message-body">
-                <div v-if="message.kind === 'message'" class="message-meta">
-                  <strong>{{ message.role === "user" ? "你" : message.role === "assistant" ? "Minimal Agent" : "工具结果" }}</strong>
-                  <span>#{{ message.seq }} · {{ formatTime(message.created_at) }}</span>
+            <template v-for="message in messages" :key="message.id">
+              <article
+                v-for="turn in reasoningBeforeMessage(message)"
+                :key="`${message.id}-reasoning-${turn.startedEventId}`"
+                class="message assistant reasoning-message"
+              >
+                <div class="message-avatar">✦</div>
+                <div class="message-body">
+                  <div class="message-meta">
+                    <strong>模型推理</strong>
+                    <span>第 {{ turn.stepNo || "—" }} 回合 · 对应下方事件</span>
+                  </div>
+                  <details class="reasoning-preview historical-reasoning" open>
+                    <summary>查看推理 · {{ turn.items.length }} 段</summary>
+                    <div
+                      v-for="item in turn.items"
+                      :key="`${item.item_id}-${item.source}-${item.content_type}`"
+                      class="reasoning-item"
+                    >
+                      <small>{{ reasoningLabel(item) }}</small>
+                      <p>{{ item.text || "模型执行了推理，但未返回可见文本。" }}</p>
+                    </div>
+                  </details>
                 </div>
-                <p v-if="message.kind === 'message' && message.role === 'user'" class="message-copy">{{ messageText(message) }}</p>
-                <div
-                  v-else-if="message.kind === 'message'"
-                  class="message-copy markdown-body"
-                  v-html="renderMarkdown(messageText(message))"
-                ></div>
-                <details v-else class="tool-card" :open="toolSucceeded(message) === false">
-                  <summary>
-                    <span class="tool-icon">⚒</span>
-                    <span class="tool-name">{{ toolName(message) }}</span>
-                    <span class="tool-badge" :class="{ error: toolSucceeded(message) === false }">{{ toolBadge(message) }}</span>
-                  </summary>
-                  <pre>{{ messageText(message) }}</pre>
-                </details>
-              </div>
-            </article>
+              </article>
+
+              <article class="message" :class="[message.role, message.kind]">
+                <div v-if="message.role === 'assistant' && message.kind === 'message'" class="message-avatar">✦</div>
+                <div class="message-body">
+                  <div v-if="message.kind === 'message'" class="message-meta">
+                    <strong>{{ message.role === "user" ? "你" : message.role === "assistant" ? "Minimal Agent" : "工具结果" }}</strong>
+                    <span>#{{ message.seq }} · {{ formatTime(message.created_at) }}</span>
+                  </div>
+                  <p v-if="message.kind === 'message' && message.role === 'user'" class="message-copy">{{ messageText(message) }}</p>
+                  <div
+                    v-else-if="message.kind === 'message'"
+                    class="message-copy markdown-body"
+                    v-html="renderMarkdown(messageText(message))"
+                  ></div>
+                  <details v-else-if="message.kind !== 'message'" class="tool-card" :open="toolSucceeded(message) === false">
+                    <summary>
+                      <span class="tool-icon">⚒</span>
+                      <span class="tool-name">{{ toolName(message) }}</span>
+                      <span class="tool-badge" :class="{ error: toolSucceeded(message) === false }">{{ toolBadge(message) }}</span>
+                    </summary>
+                    <pre>{{ messageText(message) }}</pre>
+                  </details>
+                </div>
+              </article>
+            </template>
 
             <article v-if="runIsActive && (reasoningStream || assistantStream)" class="message assistant streaming">
               <div class="message-avatar">AI</div>

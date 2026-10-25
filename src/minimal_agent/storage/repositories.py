@@ -117,6 +117,40 @@ class SessionRepository:
             ).fetchall()
         return [self._from_row(row) for row in rows]
 
+    def update_title(self, session_id: str, *, title: str) -> SessionRecord:
+        normalized = title.strip()
+        if not normalized or len(normalized) > 200:
+            raise ValueError("Session title must contain 1 to 200 characters")
+        now = _utc_now()
+        with self.database.transaction(immediate=True) as connection:
+            cursor = connection.execute(
+                "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
+                (normalized, _timestamp(now), session_id),
+            )
+            if cursor.rowcount != 1:
+                raise NotFoundError(f"Session not found: {session_id}")
+            row = connection.execute(
+                "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        return self._from_row(row)
+
+    def delete(self, session_id: str) -> None:
+        with self.database.transaction(immediate=True) as connection:
+            if (
+                connection.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone()
+                is None
+            ):
+                raise NotFoundError(f"Session not found: {session_id}")
+            if (
+                connection.execute(
+                    "SELECT 1 FROM runs WHERE session_id = ? AND status = 'running'",
+                    (session_id,),
+                ).fetchone()
+                is not None
+            ):
+                raise ActiveRunExistsError("Cannot delete a Session with a running Run")
+            connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
     def update_summary(
         self,
         session_id: str,
@@ -846,6 +880,27 @@ class StreamEventRepository:
                 LIMIT ?
                 """,
                 (run_id, after_id, limit),
+            ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def list_by_event_types(
+        self,
+        run_id: str,
+        event_types: tuple[str, ...],
+    ) -> list[StreamEventRecord]:
+        """Return all matching events for one bounded Run in durable order."""
+
+        if not event_types:
+            return []
+        placeholders = ", ".join("?" for _ in event_types)
+        with self.database.connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT * FROM stream_events
+                WHERE run_id = ? AND event_type IN ({placeholders})
+                ORDER BY id ASC
+                """,
+                (run_id, *event_types),
             ).fetchall()
         return [self._from_row(row) for row in rows]
 

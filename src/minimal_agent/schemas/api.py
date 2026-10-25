@@ -21,6 +21,18 @@ class CreateSessionRequest(APIModel):
         return normalized or None
 
 
+class UpdateSessionRequest(APIModel):
+    title: Annotated[str, Field(min_length=1, max_length=200)]
+
+    @field_validator("title")
+    @classmethod
+    def normalize_title(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("title must not be blank")
+        return normalized
+
+
 class CreateMessageRequest(APIModel):
     text: Annotated[str, Field(min_length=1, max_length=1_000_000)]
 

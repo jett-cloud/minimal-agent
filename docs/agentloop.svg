@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="950" viewBox="0 0 1200 950" font-family="'Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c2410c"/>
+    </marker>
+  </defs>
+
+  <rect x="8" y="8" width="1184" height="934" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- 标题 -->
+  <text x="600" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#0f172a">AgentLoop · ReAct 循环（src/minimal_agent/agent/loop.py）</text>
+  <text x="600" y="56" text-anchor="middle" font-size="13" fill="#64748b">一个 Run 最多 8 个回合：每回合 = 装配上下文 → LLM 决策 → 工具调用（回到下一回合）或 最终答案（结束）</text>
+
+  <!-- 入口行 -->
+  <rect x="70" y="88" width="250" height="68" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="195" y="110" text-anchor="middle" font-size="14" font-weight="700" fill="#1e3a8a">HTTP API</text>
+  <text x="195" y="133" text-anchor="middle" font-size="12.5" fill="#334155">POST /v1/sessions/{id}/messages</text>
+  <text x="195" y="151" text-anchor="middle" font-size="12.5" fill="#334155">202 + run_id · 原子创建 Run</text>
+
+  <line x1="320" y1="122" x2="376" y2="122" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="380" y="88" width="250" height="68" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="505" y="110" text-anchor="middle" font-size="14" font-weight="700" fill="#1e3a8a">RunSupervisor</text>
+  <text x="505" y="133" text-anchor="middle" font-size="12.5" fill="#334155">后台 asyncio Task 持有</text>
+  <text x="505" y="151" text-anchor="middle" font-size="12.5" fill="#334155">重启时恢复中断 Run</text>
+
+  <line x1="630" y1="122" x2="686" y2="122" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="690" y="88" width="250" height="68" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="815" y="110" text-anchor="middle" font-size="14" font-weight="700" fill="#1e3a8a">AgentLoop.execute</text>
+  <text x="815" y="133" text-anchor="middle" font-size="12.5" fill="#334155">发布 run.started，逐回合执行</text>
+  <text x="815" y="151" text-anchor="middle" font-size="12.5" fill="#334155">异常 → _fail_run 结构化终止</text>
+
+  <path d="M 815 156 L 815 170 L 600 170 L 600 176" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ① 装配上下文 -->
+  <rect x="430" y="180" width="340" height="100" rx="8" fill="#f0fdfa" stroke="#0f766e" stroke-width="1.5"/>
+  <text x="600" y="202" text-anchor="middle" font-size="14" font-weight="700" fill="#134e4a">① 装配上下文 · ContextBuilder.prepare</text>
+  <text x="600" y="228" text-anchor="middle" font-size="12.5" fill="#334155">系统提示 + 会话摘要 + 历史消息 + 工具定义</text>
+  <text x="600" y="252" text-anchor="middle" font-size="12.5" fill="#334155">估算输入 token；≥ 80% 窗口时触发压缩</text>
+  <text x="600" y="274" text-anchor="middle" font-size="12.5" fill="#334155">只压缩已完成旧轮，保留最近 5 轮原文</text>
+
+  <line x1="600" y1="280" x2="600" y2="300" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ② LLM 流式 -->
+  <rect x="430" y="304" width="340" height="100" rx="8" fill="#f0fdfa" stroke="#0f766e" stroke-width="1.5"/>
+  <text x="600" y="326" text-anchor="middle" font-size="14" font-weight="700" fill="#134e4a">② LLM 流式请求（适配器 + 推理捕获）</text>
+  <text x="600" y="352" text-anchor="middle" font-size="12.5" fill="#334155">Responses / Chat Completions → 内部事件</text>
+  <text x="600" y="376" text-anchor="middle" font-size="12.5" fill="#334155">白名单映射 + 有限重试（退避）</text>
+  <text x="600" y="398" text-anchor="middle" font-size="12.5" fill="#334155">推理双路捕获：结构化 reasoning / &lt;think&gt; 标签</text>
+
+  <line x1="600" y1="404" x2="600" y2="424" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ③ 汇总 -->
+  <rect x="430" y="428" width="340" height="100" rx="8" fill="#f0fdfa" stroke="#0f766e" stroke-width="1.5"/>
+  <text x="600" y="450" text-anchor="middle" font-size="14" font-weight="700" fill="#134e4a">③ StepAccumulator 汇总</text>
+  <text x="600" y="476" text-anchor="middle" font-size="12.5" fill="#334155">转发 reasoning / assistant / tool_call 增量</text>
+  <text x="600" y="500" text-anchor="middle" font-size="12.5" fill="#334155">校验流完整性（不完整 → LLM_RESPONSE_INCOMPLETE）</text>
+  <text x="600" y="522" text-anchor="middle" font-size="12.5" fill="#334155">产出唯一决策：工具调用 或 最终答案</text>
+
+  <line x1="600" y1="528" x2="600" y2="540" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- 决策菱形 -->
+  <polygon points="600,544 700,594 600,644 500,594" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+  <text x="600" y="599" text-anchor="middle" font-size="14" font-weight="700" fill="#92400e">决策</text>
+
+  <text x="742" y="580" font-size="11.5" fill="#c2410c">工具调用 →</text>
+  <text x="612" y="660" font-size="11.5" fill="#16a34a">最终答案 ↓</text>
+
+  <line x1="700" y1="594" x2="816" y2="594" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ④ 工具执行 -->
+  <rect x="820" y="528" width="340" height="132" rx="8" fill="#fff7ed" stroke="#c2410c" stroke-width="1.5"/>
+  <text x="990" y="550" text-anchor="middle" font-size="14" font-weight="700" fill="#7c2d12">④ 工具执行 · DurableToolExecutor</text>
+  <text x="990" y="574" text-anchor="middle" font-size="12.5" fill="#334155">同事务持久化：invocation + tool_call 消息</text>
+  <text x="990" y="596" text-anchor="middle" font-size="12.5" fill="#334155">参数校验（严格 JSON Schema / Pydantic）</text>
+  <text x="990" y="618" text-anchor="middle" font-size="12.5" fill="#334155">执行；超时或结果未知 → 按声明重试 ≤ 1 次</text>
+  <text x="990" y="640" text-anchor="middle" font-size="12.5" fill="#334155">结果 + tool_result 消息同事务提交</text>
+
+  <line x1="990" y1="660" x2="990" y2="682" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ⑤ 结果回填 -->
+  <rect x="820" y="686" width="340" height="64" rx="8" fill="#fff7ed" stroke="#c2410c" stroke-width="1.5"/>
+  <text x="990" y="708" text-anchor="middle" font-size="14" font-weight="700" fill="#7c2d12">⑤ 结果回填</text>
+  <text x="990" y="730" text-anchor="middle" font-size="12.5" fill="#334155">tool_result 写入消息历史，进入下一回合</text>
+
+  <!-- 回环（右侧绕行） -->
+  <path d="M 990 750 L 990 848 L 1172 848 L 1172 230 L 774 230" fill="none" stroke="#c2410c" stroke-width="1.5" stroke-dasharray="7 5" marker-end="url(#arrow-orange)"/>
+  <text x="990" y="222" text-anchor="middle" font-size="12.5" font-weight="700" fill="#c2410c">↺ 下一回合（≤ 8 步）</text>
+
+  <!-- ⑥ 最终答案提交 -->
+  <line x1="600" y1="644" x2="600" y2="664" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="430" y="668" width="340" height="88" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="600" y="690" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">⑥ 最终答案提交</text>
+  <text x="600" y="712" text-anchor="middle" font-size="12.5" fill="#334155">assistant.done → 最终消息 + Run 终态</text>
+  <text x="600" y="732" text-anchor="middle" font-size="12.5" fill="#334155">+ run.completed / run.failed 终止事件</text>
+  <text x="600" y="750" text-anchor="middle" font-size="12.5" fill="#334155">同一事务原子提交（先完成事件后必有消息）</text>
+
+  <line x1="600" y1="756" x2="600" y2="776" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ⑦ Run 结束 -->
+  <rect x="430" y="780" width="340" height="56" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="600" y="802" text-anchor="middle" font-size="14" font-weight="700" fill="#14532d">⑦ Run 结束</text>
+  <text x="600" y="824" text-anchor="middle" font-size="12.5" fill="#334155">SSE 终态 · Trace 落库 · 通知前端</text>
+
+  <path d="M 600 836 L 600 854" fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+  <text x="612" y="850" font-size="11.5" fill="#64748b">终态事件 →</text>
+
+  <!-- 事件输出带 -->
+  <text x="80" y="846" font-size="13" font-weight="700" fill="#1e293b">事件输出（Run 全程：先落库、再推送）</text>
+
+  <rect x="70" y="858" width="330" height="60" rx="8" fill="#f8fafc" stroke="#475569" stroke-width="1.5"/>
+  <text x="235" y="880" text-anchor="middle" font-size="14" font-weight="700" fill="#1e293b">BufferedEventWriter</text>
+  <text x="235" y="902" text-anchor="middle" font-size="12.5" fill="#334155">8 KiB / 100 ms / 屏障 → 批量落库</text>
+
+  <line x1="400" y1="888" x2="426" y2="888" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="430" y="858" width="330" height="60" rx="8" fill="#f8fafc" stroke="#475569" stroke-width="1.5"/>
+  <text x="595" y="880" text-anchor="middle" font-size="14" font-weight="700" fill="#1e293b">SQLite · stream_events</text>
+  <text x="595" y="902" text-anchor="middle" font-size="12.5" fill="#334155">17 种标准事件 · (run_id, seq) 唯一</text>
+
+  <line x1="760" y1="888" x2="786" y2="888" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="790" y="858" width="330" height="60" rx="8" fill="#f8fafc" stroke="#475569" stroke-width="1.5"/>
+  <text x="955" y="880" text-anchor="middle" font-size="14" font-weight="700" fill="#1e293b">SSE 推送</text>
+  <text x="955" y="902" text-anchor="middle" font-size="12.5" fill="#334155">按 id 重放 · Last-Event-ID 续传 · 15s 心跳</text>
+
+  <!-- 图例 -->
+  <rect x="70" y="926" width="12" height="12" rx="3" fill="#eff6ff" stroke="#2563eb" stroke-width="1.2"/>
+  <text x="88" y="936" font-size="12" fill="#475569">入口</text>
+  <rect x="140" y="926" width="12" height="12" rx="3" fill="#f0fdfa" stroke="#0f766e" stroke-width="1.2"/>
+  <text x="158" y="936" font-size="12" fill="#475569">循环核心</text>
+  <rect x="250" y="926" width="12" height="12" rx="3" fill="#fffbeb" stroke="#d97706" stroke-width="1.2"/>
+  <text x="268" y="936" font-size="12" fill="#475569">决策</text>
+  <rect x="330" y="926" width="12" height="12" rx="3" fill="#fff7ed" stroke="#c2410c" stroke-width="1.2"/>
+  <text x="348" y="936" font-size="12" fill="#475569">工具分支</text>
+  <rect x="430" y="926" width="12" height="12" rx="3" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.2"/>
+  <text x="448" y="936" font-size="12" fill="#475569">答案提交</text>
+  <rect x="530" y="926" width="12" height="12" rx="3" fill="#f8fafc" stroke="#475569" stroke-width="1.2"/>
+  <text x="548" y="936" font-size="12" fill="#475569">事件流</text>
+</svg>

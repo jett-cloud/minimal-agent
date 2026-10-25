@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="470" viewBox="0 0 1200 470" font-family="'Microsoft YaHei','PingFang SC','Noto Sans SC',Arial,sans-serif">
+  <rect x="8" y="8" width="1184" height="454" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- 标题 -->
+  <text x="600" y="34" text-anchor="middle" font-size="20" font-weight="700" fill="#0f172a">Session Memory · 放置方式（src/minimal_agent/agent/context.py）</text>
+  <text x="600" y="56" text-anchor="middle" font-size="13" fill="#64748b">LLMRequest 自上而下组装：instructions / tools / input[0] 摘要 / input[1..] 原始消息</text>
+
+  <!-- ============ ③ 放置方式 ============ -->
+  <rect x="30" y="78" width="1140" height="296" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <rect x="48" y="86" width="96" height="24" rx="6" fill="#16a34a"/>
+  <text x="96" y="102" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">③ 放置方式</text>
+
+  <rect x="60" y="112" width="1080" height="56" rx="8" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  <rect x="76" y="112" width="130" height="56" rx="8" fill="#16a34a"/>
+  <text x="141" y="146" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">instructions</text>
+  <text x="230" y="146" font-size="13" fill="#334155">system prompt + 当前回合 @工具指令（点名命中时收窄可用工具）</text>
+
+  <rect x="60" y="178" width="1080" height="56" rx="8" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  <rect x="76" y="178" width="130" height="56" rx="8" fill="#16a34a"/>
+  <text x="141" y="212" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">tools</text>
+  <text x="230" y="212" font-size="13" fill="#334155">本回合可用工具的 JSON Schema（名称 / 描述 / 严格参数模型）</text>
+
+  <rect x="60" y="244" width="1080" height="56" rx="8" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  <rect x="76" y="244" width="130" height="56" rx="8" fill="#16a34a"/>
+  <text x="141" y="278" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">input[0]</text>
+  <text x="230" y="278" font-size="13" fill="#334155">Session summary —— 以 system 消息放在最前（存在时）</text>
+
+  <rect x="60" y="310" width="1080" height="56" rx="8" fill="#ffffff" stroke="#16a34a" stroke-width="1.5"/>
+  <rect x="76" y="310" width="130" height="56" rx="8" fill="#16a34a"/>
+  <text x="141" y="344" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">input[1..]</text>
+  <text x="230" y="344" font-size="13" fill="#334155">summary_through_seq 之后的原始消息，按 seq 排序：user / assistant / tool call / tool result</text>
+
+  <text x="1080" y="396" text-anchor="end" font-size="12" fill="#475569">自上而下组装为一个 LLMRequest</text>
+
+  <!-- 备注 -->
+  <text x="60" y="404" font-size="12.5" fill="#475569">· 摘要区间持久化：sessions.summary / summary_from_seq / summary_through_seq</text>
+  <text x="620" y="404" font-size="12.5" fill="#475569">· 原始 messages 不因压缩删除，摘要只影响加载范围</text>
+  <text x="60" y="428" font-size="12.5" fill="#475569">· reasoning.* 事件与 Trace 仅用于展示 / 诊断，不参与召回</text>
+  <text x="620" y="428" font-size="12.5" fill="#475569">· 工具续传元数据随对应 tool_call 保留，供下一步继续使用</text>
+
+  <!-- 图例 -->
+  <rect x="60" y="446" width="12" height="12" rx="3" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.2"/>
+  <text x="78" y="456" font-size="12" fill="#475569">放置方式层</text>
+  <text x="170" y="456" font-size="12" fill="#475569">左端深色块 = LLMRequest 字段名 · 白底 = 内容</text>
+</svg>

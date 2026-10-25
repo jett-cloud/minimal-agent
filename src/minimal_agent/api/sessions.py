@@ -3,7 +3,7 @@
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from minimal_agent.api.errors import APIError
 from minimal_agent.dependencies import get_application_services
@@ -14,9 +14,10 @@ from minimal_agent.schemas import (
     MessageRecord,
     RunAcceptedResponse,
     SessionRecord,
+    UpdateSessionRequest,
 )
 from minimal_agent.services import ApplicationServices
-from minimal_agent.storage import ActiveRunExistsError
+from minimal_agent.storage import ActiveRunExistsError, NotFoundError
 
 router = APIRouter(prefix="/v1/sessions", tags=["sessions"])
 _ERROR_RESPONSES = {
@@ -63,6 +64,44 @@ async def get_session(
     if session is None:
         raise APIError(404, "SESSION_NOT_FOUND", "Session not found")
     return session
+
+
+@router.patch(
+    "/{session_id}",
+    response_model=SessionRecord,
+    responses={404: _ERROR_RESPONSES[404], 422: _ERROR_RESPONSES[422]},
+)
+async def update_session(
+    session_id: str,
+    request: UpdateSessionRequest,
+    services: Annotated[ApplicationServices, Depends(get_application_services)],
+) -> SessionRecord:
+    try:
+        return await asyncio.to_thread(
+            services.sessions.update_title,
+            session_id,
+            title=request.title,
+        )
+    except NotFoundError as error:
+        raise APIError(404, "SESSION_NOT_FOUND", "Session not found") from error
+
+
+@router.delete(
+    "/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: _ERROR_RESPONSES[404], 409: _ERROR_RESPONSES[409]},
+)
+async def delete_session(
+    session_id: str,
+    services: Annotated[ApplicationServices, Depends(get_application_services)],
+) -> Response:
+    try:
+        await asyncio.to_thread(services.sessions.delete, session_id)
+    except NotFoundError as error:
+        raise APIError(404, "SESSION_NOT_FOUND", "Session not found") from error
+    except ActiveRunExistsError as error:
+        raise APIError(409, "SESSION_BUSY", "Session already has a running Run") from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get(

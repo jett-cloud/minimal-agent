@@ -1,5 +1,6 @@
 """Tool contracts independent of any LLM SDK."""
 
+import inspect
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -7,7 +8,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
-type ToolHandler[ArgsT: BaseModel] = Callable[[ArgsT], JsonValue | Awaitable[JsonValue]]
+type ToolHandler[ArgsT: BaseModel] = Callable[..., JsonValue | Awaitable[JsonValue]]
 
 _TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _SCHEMA_METADATA_TO_REMOVE = frozenset({"default", "examples", "title"})
@@ -21,8 +22,18 @@ class ToolSideEffect(StrEnum):
 
 class ToolRetrySemantics(StrEnum):
     SAFE = "safe"
-    IDEMPOTENCY_KEY = "idempotency_key"
+    WITH_IDEMPOTENCY_KEY = "with_idempotency_key"
     NEVER = "never"
+
+
+@dataclass(frozen=True, slots=True)
+class ToolExecutionContext:
+    """Framework-owned identity shared by every attempt of one logical tool call."""
+
+    invocation_id: str
+    provider_call_id: str
+    idempotency_key: str | None
+    attempt_no: int
 
 
 class ToolError(BaseModel):
@@ -102,6 +113,16 @@ class ToolExecutionError(Exception):
         self.details = details or {}
 
 
+class ToolResultUnknownError(RuntimeError):
+    """Raised when every safe attempt ended without a definite result."""
+
+    code = "TOOL_RESULT_UNKNOWN"
+
+    def __init__(self, message: str = "Tool result is unknown after retry") -> None:
+        super().__init__(message)
+        self.message = message
+
+
 @dataclass(frozen=True, slots=True)
 class ToolDefinition[ArgsT: BaseModel]:
     """A named, validated callable exposed to the model."""
@@ -110,17 +131,25 @@ class ToolDefinition[ArgsT: BaseModel]:
     description: str
     args_model: type[ArgsT]
     handler: ToolHandler[ArgsT]
-    timeout_seconds: float = 10.0
+    timeout_seconds: float | None = None
     side_effect: ToolSideEffect = ToolSideEffect.PURE
-    retry_semantics: ToolRetrySemantics = ToolRetrySemantics.SAFE
+    retry_semantics: ToolRetrySemantics = ToolRetrySemantics.NEVER
 
     def __post_init__(self) -> None:
         if _TOOL_NAME.fullmatch(self.name) is None:
             raise ValueError("Tool name must be 1-64 letters, digits, underscores, or hyphens")
         if not self.description.strip():
             raise ValueError("Tool description must not be empty")
-        if self.timeout_seconds <= 0:
+        if self.timeout_seconds is not None and self.timeout_seconds <= 0:
             raise ValueError("Tool timeout must be positive")
+        parameter_count = len(inspect.signature(self.handler).parameters)
+        if self.retry_semantics is ToolRetrySemantics.WITH_IDEMPOTENCY_KEY:
+            if parameter_count != 2:
+                raise ValueError(
+                    "Tools using with_idempotency_key must accept arguments and execution context"
+                )
+        elif parameter_count not in {1, 2}:
+            raise ValueError("Tool handlers must accept arguments and optional execution context")
 
     def parameters_schema(self) -> dict[str, JsonValue]:
         """Return a sanitized JSON Schema compatible with strict function calling."""

@@ -8,6 +8,12 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 INSERT OR IGNORE INTO schema_meta (version, applied_at)
 VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
+INSERT OR IGNORE INTO schema_meta (version, applied_at)
+VALUES (2, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+INSERT OR IGNORE INTO schema_meta (version, applied_at)
+VALUES (3, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     title TEXT,
@@ -108,4 +114,68 @@ CREATE TABLE IF NOT EXISTS stream_events (
 
 CREATE INDEX IF NOT EXISTS idx_stream_events_run_id
 ON stream_events(run_id, id);
+
+CREATE TABLE IF NOT EXISTS orders (
+    id TEXT PRIMARY KEY,
+    customer_name TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity >= 1 AND quantity <= 100000),
+    unit_price TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('pending', 'confirmed', 'shipped', 'completed', 'cancelled')
+    ),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_orders_created_at
+ON orders(created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_orders_status_created_at
+ON orders(status, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS order_operations (
+    idempotency_key TEXT PRIMARY KEY,
+    operation TEXT NOT NULL CHECK (operation IN ('create', 'update', 'delete')),
+    request_hash TEXT NOT NULL,
+    response_json TEXT NOT NULL CHECK (json_valid(response_json)),
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS tool_invocations (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    step_no INTEGER NOT NULL CHECK (step_no >= 1),
+    provider_call_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    arguments_json TEXT NOT NULL CHECK (json_valid(arguments_json)),
+    arguments_hash TEXT NOT NULL,
+    idempotency_key TEXT,
+    retry_semantics TEXT NOT NULL CHECK (
+        retry_semantics IN ('safe', 'with_idempotency_key', 'never')
+    ),
+    status TEXT NOT NULL CHECK (
+        status IN ('pending', 'succeeded', 'failed', 'unknown')
+    ),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    result_json TEXT CHECK (result_json IS NULL OR json_valid(result_json)),
+    error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json)),
+    tool_call_message_id TEXT NOT NULL,
+    result_message_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT,
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (tool_call_message_id) REFERENCES messages(id) ON DELETE RESTRICT
+        DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (result_message_id) REFERENCES messages(id) ON DELETE SET NULL
+        DEFERRABLE INITIALLY DEFERRED,
+    UNIQUE (run_id, provider_call_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_invocations_run_step
+ON tool_invocations(run_id, step_no DESC, created_at DESC);
 

@@ -65,18 +65,15 @@ class Settings(BaseSettings):
     llm_reasoning_summary: Literal["auto", "concise", "detailed"] | None = None
     llm_think_tag_enabled: bool = True
     llm_think_tag_name: str = Field(default="think", pattern=r"^[A-Za-z][A-Za-z0-9_-]{0,31}$")
-    llm_max_output_tokens: int = Field(default=512, ge=1)
-
     agent_max_steps: int = Field(default=8, ge=1, le=32)
-    agent_run_timeout_seconds: float = Field(default=60.0, gt=0)
     agent_shutdown_grace_seconds: float = Field(default=5.0, ge=0)
     user_message_max_chars: int = Field(default=20_000, ge=1, le=1_000_000)
     llm_timeout_seconds: float = Field(default=20.0, gt=0)
     llm_max_retries: int = Field(default=3, ge=0, le=10)
-    tool_timeout_seconds: float = Field(default=10.0, gt=0)
     weather_http_timeout_seconds: float = Field(default=5.0, gt=0)
+    order_tool_timeout_seconds: float = Field(default=5.0, gt=0)
 
-    context_window_tokens: int = Field(default=0, ge=0)
+    injected_llm_context_window_tokens: int | None = Field(default=None, ge=1)
     context_trigger_ratio: float = Field(default=0.80, gt=0, lt=1)
     recent_turns_to_keep: int = Field(default=5, ge=1)
 

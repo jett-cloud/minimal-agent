@@ -1,5 +1,6 @@
 import asyncio
 
+import httpx
 import pytest
 from pydantic import BaseModel, ConfigDict
 
@@ -17,6 +18,7 @@ def echo(arguments: EchoArguments) -> dict[str, str]:
 
 
 def test_registry_exports_responses_api_strict_schema() -> None:
+    # 验证工具注册表导出严格的 Responses API Schema。
     registry = ToolRegistry(
         [
             ToolDefinition(
@@ -29,6 +31,9 @@ def test_registry_exports_responses_api_strict_schema() -> None:
     )
 
     assert registry.names == ("echo",)
+    registered = registry.get("echo")
+    assert registered is not None
+    assert registered.timeout_seconds is None
     assert registry.openai_tools() == [
         {
             "type": "function",
@@ -46,6 +51,7 @@ def test_registry_exports_responses_api_strict_schema() -> None:
 
 
 def test_registry_rejects_duplicates_and_non_strict_models() -> None:
+    # 验证工具注册表拒绝重名工具和非严格模型。
     registry = ToolRegistry()
     tool = ToolDefinition(
         name="echo",
@@ -76,6 +82,7 @@ def test_registry_rejects_duplicates_and_non_strict_models() -> None:
 
 @pytest.mark.asyncio
 async def test_registry_executes_sync_and_async_handlers() -> None:
+    # 验证工具注册表可执行同步和异步处理器。
     async def async_echo(arguments: EchoArguments) -> dict[str, str]:
         await asyncio.sleep(0)
         return {"async": arguments.text}
@@ -108,6 +115,7 @@ async def test_registry_executes_sync_and_async_handlers() -> None:
 
 @pytest.mark.asyncio
 async def test_registry_returns_validation_and_lookup_errors() -> None:
+    # 验证工具注册表返回参数校验和查找错误。
     registry = ToolRegistry(
         [
             ToolDefinition(
@@ -137,6 +145,7 @@ async def test_registry_returns_validation_and_lookup_errors() -> None:
 
 @pytest.mark.asyncio
 async def test_registry_normalizes_timeouts_and_handler_failures() -> None:
+    # 验证工具注册表统一超时和处理器故障。
     async def slow(arguments: EchoArguments) -> str:
         await asyncio.sleep(1)
         return arguments.text
@@ -150,6 +159,13 @@ async def test_registry_normalizes_timeouts_and_handler_failures() -> None:
 
     def unexpected_failure(arguments: EchoArguments) -> str:
         raise RuntimeError(arguments.text)
+
+    def handler_timeout(arguments: EchoArguments) -> str:
+        raise TimeoutError(arguments.text)
+
+    def handler_http_timeout(arguments: EchoArguments) -> str:
+        request = httpx.Request("POST", "https://orders.test")
+        raise httpx.ReadTimeout(arguments.text, request=request)
 
     registry = ToolRegistry(
         [
@@ -172,12 +188,26 @@ async def test_registry_normalizes_timeouts_and_handler_failures() -> None:
                 args_model=EchoArguments,
                 handler=unexpected_failure,
             ),
+            ToolDefinition(
+                name="handler_timeout",
+                description="Handler-reported timeout.",
+                args_model=EchoArguments,
+                handler=handler_timeout,
+            ),
+            ToolDefinition(
+                name="handler_http_timeout",
+                description="Handler-reported HTTP timeout.",
+                args_model=EchoArguments,
+                handler=handler_http_timeout,
+            ),
         ]
     )
 
     timeout = await registry.execute("slow", {"text": "wait"})
     expected = await registry.execute("expected_failure", {"text": "safe"})
     unexpected = await registry.execute("unexpected_failure", {"text": "secret"})
+    reported_timeout = await registry.execute("handler_timeout", {"text": "wait"})
+    reported_http_timeout = await registry.execute("handler_http_timeout", {"text": "wait"})
 
     assert timeout.error is not None
     assert timeout.error.code == "TOOL_TIMEOUT"
@@ -189,3 +219,9 @@ async def test_registry_normalizes_timeouts_and_handler_failures() -> None:
     assert unexpected.error.code == "TOOL_FAILED"
     assert unexpected.error.message == "Tool execution failed unexpectedly"
     assert "secret" not in unexpected.model_dump_json()
+    assert reported_timeout.error is not None
+    assert reported_timeout.error.code == "TOOL_TIMEOUT"
+    assert reported_timeout.error.retryable is True
+    assert reported_http_timeout.error is not None
+    assert reported_http_timeout.error.code == "TOOL_TIMEOUT"
+    assert reported_http_timeout.error.retryable is True

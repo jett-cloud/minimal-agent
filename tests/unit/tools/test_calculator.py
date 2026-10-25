@@ -21,6 +21,7 @@ async def test_calculator_evaluates_bounded_decimal_arithmetic(
     expression: str,
     expected: str,
 ) -> None:
+    # 验证计算器执行有界十进制运算。
     result = await ToolRegistry([CALCULATOR_TOOL]).execute("calculator", {"expression": expression})
 
     assert result.ok is True
@@ -29,6 +30,7 @@ async def test_calculator_evaluates_bounded_decimal_arithmetic(
 
 @pytest.mark.asyncio
 async def test_calculator_supports_square_root() -> None:
+    # 验证计算器支持平方根。
     result = await ToolRegistry([CALCULATOR_TOOL]).execute("calculator", {"expression": "sqrt(2)"})
 
     assert result.ok is True
@@ -49,6 +51,7 @@ async def test_calculator_supports_square_root() -> None:
     ],
 )
 async def test_calculator_rejects_unsafe_or_invalid_expressions(expression: str) -> None:
+    # 验证计算器拒绝不安全或无效表达式。
     result = await ToolRegistry([CALCULATOR_TOOL]).execute("calculator", {"expression": expression})
 
     assert result.ok is False
@@ -58,6 +61,7 @@ async def test_calculator_rejects_unsafe_or_invalid_expressions(expression: str)
 
 @pytest.mark.asyncio
 async def test_calculator_validates_expression_length() -> None:
+    # 验证计算器校验表达式长度。
     result = await ToolRegistry([CALCULATOR_TOOL]).execute("calculator", {"expression": "1" * 513})
 
     assert result.ok is False

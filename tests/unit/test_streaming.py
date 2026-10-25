@@ -40,6 +40,7 @@ def _create_run(
 
 
 def test_public_event_schema_is_strict_and_converts_to_pending() -> None:
+    # 验证公共事件 Schema 严格校验并转换为待写事件。
     event = AssistantDeltaEvent(item_id="item_1", delta="你", source_seq=4)
 
     assert event.to_pending() == PendingStreamEvent(
@@ -55,6 +56,7 @@ def test_public_event_schema_is_strict_and_converts_to_pending() -> None:
 async def test_writer_preserves_order_and_only_merges_adjacent_matching_deltas(
     database: Database,
 ) -> None:
+    # 验证写入器保持顺序且只合并相邻同类增量。
     run_id, _, events = _create_run(database)
     publisher = EventPublisher()
     writer = BufferedEventWriter(
@@ -86,6 +88,7 @@ async def test_writer_preserves_order_and_only_merges_adjacent_matching_deltas(
 
 @pytest.mark.asyncio
 async def test_writer_flushes_at_byte_threshold(database: Database) -> None:
+    # 验证写入器达到字节阈值时刷新。
     run_id, _, events = _create_run(database)
     publisher = EventPublisher()
     writer = BufferedEventWriter(
@@ -111,6 +114,7 @@ async def test_writer_flushes_at_byte_threshold(database: Database) -> None:
 
 @pytest.mark.asyncio
 async def test_writer_flushes_after_interval(database: Database) -> None:
+    # 验证写入器达到时间间隔后刷新。
     run_id, _, events = _create_run(database)
     publisher = EventPublisher()
     writer = BufferedEventWriter(
@@ -137,6 +141,7 @@ async def test_writer_flushes_after_interval(database: Database) -> None:
 async def test_terminal_barrier_flushes_pending_and_rejects_later_events(
     database: Database,
 ) -> None:
+    # 验证终态屏障刷新待写事件并拒绝后续事件。
     run_id, _, events = _create_run(database)
     publisher = EventPublisher()
     writer = BufferedEventWriter(
@@ -162,6 +167,7 @@ async def test_terminal_barrier_flushes_pending_and_rejects_later_events(
 
 @pytest.mark.asyncio
 async def test_publisher_wakes_all_subscribers() -> None:
+    # 验证发布器唤醒所有订阅者。
     publisher = EventPublisher()
     waiters = [
         asyncio.create_task(publisher.wait_for_change("run_1", after_revision=0, timeout_seconds=1))
@@ -174,6 +180,7 @@ async def test_publisher_wakes_all_subscribers() -> None:
 
 @pytest.mark.asyncio
 async def test_replay_resumes_after_global_event_id_without_duplicates(database: Database) -> None:
+    # 验证按全局事件编号续传且不重复。
     run_id, runs, events = _create_run(database)
     records = events.append_batch(
         run_id,
@@ -206,6 +213,7 @@ async def test_replay_resumes_after_global_event_id_without_duplicates(database:
 
 @pytest.mark.asyncio
 async def test_heartbeat_is_not_persisted(database: Database) -> None:
+    # 验证 SSE 心跳不会持久化。
     run_id, runs, events = _create_run(database)
     stream = replay_run_events(
         run_id,
@@ -223,6 +231,7 @@ async def test_heartbeat_is_not_persisted(database: Database) -> None:
 
 @pytest.mark.asyncio
 async def test_disconnected_reader_does_not_cancel_writer(database: Database) -> None:
+    # 验证读取端断开不会取消写入端。
     run_id, runs, events = _create_run(database)
     publisher = EventPublisher()
     writer = BufferedEventWriter(run_id, store=events, publisher=publisher)

@@ -45,6 +45,35 @@ export const api = {
       method: "POST",
       body: JSON.stringify(title?.trim() ? { title: title.trim() } : {}),
     }),
+  updateSession: (sessionId, title) =>
+    request(`/v1/sessions/${sessionId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ title }),
+    }),
+  deleteSession: (sessionId) => request(`/v1/sessions/${sessionId}`, { method: "DELETE" }),
+  listOrders: ({ status, limit = 100, offset = 0 } = {}) => {
+    const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+    if (status) query.set("status", status)
+    return request(`/v1/orders?${query}`)
+  },
+  getOrder: (orderId) => request(`/v1/orders/${orderId}`),
+  createOrder: (payload, idempotencyKey) =>
+    request("/v1/orders", {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  updateOrder: (orderId, payload, idempotencyKey) =>
+    request(`/v1/orders/${orderId}`, {
+      method: "PATCH",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  deleteOrder: (orderId, expectedVersion, idempotencyKey) =>
+    request(`/v1/orders/${orderId}?expected_version=${expectedVersion}`, {
+      method: "DELETE",
+      headers: { "Idempotency-Key": idempotencyKey },
+    }),
   listMessages: (sessionId) => request(`/v1/sessions/${sessionId}/messages?limit=1000`),
   createMessage: (sessionId, text) =>
     request(`/v1/sessions/${sessionId}/messages`, {
@@ -53,5 +82,11 @@ export const api = {
     }),
   getRun: (runId) => request(`/v1/runs/${runId}`),
   getTrace: (runId) => request(`/v1/runs/${runId}/trace`),
-  eventUrl: (runId) => `${API_BASE}/v1/runs/${runId}/events`,
+  getReasoning: (runId) => request(`/v1/runs/${runId}/reasoning`),
+  getEventHistory: (runId, afterId = 0, limit = 1000) =>
+    request(`/v1/runs/${runId}/event-history?after_id=${afterId}&limit=${limit}`),
+  eventUrl: (runId, afterId = 0) => {
+    const suffix = afterId > 0 ? `?after_id=${afterId}` : ""
+    return `${API_BASE}/v1/runs/${runId}/events${suffix}`
+  },
 }

@@ -1,15 +1,11 @@
-# Session Summary Task
+# 会话摘要任务
+将已有会话摘要（如有）和本次已完成对话回合合并。
+仅返回精简后的新摘要。
+保留后续对话可能需要用到的信息：
+- 用户偏好与约束条件；
+- 用户提供或确认的持续性事实；
+- 未完成任务与待解决问题；
+- 关键决定及其理由；
+- 重要工具返回结果，包含标识、数值、来源以及相关报错。
 
-Merge the existing Session summary, if present, with the supplied completed conversation turns.
-Return only the new compact summary.
-
-Preserve information that future turns may need:
-
-- user preferences and constraints;
-- durable facts supplied or confirmed by the user;
-- unfinished tasks and open questions;
-- key decisions and their reasons;
-- important tool results, including identifiers, values, sources, and relevant errors.
-
-Do not invent facts. Do not repeat transient wording, greetings, or superseded details. Clearly
-distinguish confirmed facts from unresolved items.
+不得编造事实。不要保留临时性语句、问候语、已过时信息。清晰区分**已确认事实**和**待解决事项**。

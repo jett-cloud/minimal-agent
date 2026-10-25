@@ -6,9 +6,16 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
-from pydantic import JsonValue, TypeAdapter, ValidationError
+import httpx
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
-from minimal_agent.tools.base import ToolDefinition, ToolExecutionError, ToolResult
+from minimal_agent.tools.base import (
+    ToolDefinition,
+    ToolExecutionContext,
+    ToolExecutionError,
+    ToolResult,
+    ToolRetrySemantics,
+)
 
 _JSON_VALUE_ADAPTER = TypeAdapter(JsonValue)
 
@@ -44,7 +51,13 @@ class ToolRegistry:
             definitions.append(tool.to_openai_tool())
         return definitions
 
-    async def execute_json(self, name: str, arguments_json: str) -> ToolResult:
+    async def execute_json(
+        self,
+        name: str,
+        arguments_json: str,
+        *,
+        context: ToolExecutionContext | None = None,
+    ) -> ToolResult:
         try:
             arguments = json.loads(arguments_json)
         except json.JSONDecodeError as error:
@@ -58,9 +71,15 @@ class ToolRegistry:
                 "INVALID_ARGUMENTS",
                 "Tool arguments must be a JSON object",
             )
-        return await self.execute(name, arguments)
+        return await self.execute(name, arguments, context=context)
 
-    async def execute(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        context: ToolExecutionContext | None = None,
+    ) -> ToolResult:
         tool = self.get(name)
         if tool is None:
             return ToolResult.failure(
@@ -69,8 +88,43 @@ class ToolRegistry:
                 details={"tool_name": name},
             )
 
+        validated_arguments, validation_error = self.validate_arguments(tool, arguments)
+        if validation_error is not None:
+            return validation_error
+        if validated_arguments is None:
+            raise RuntimeError("Validated tool arguments are missing")
+
+        if tool.retry_semantics is ToolRetrySemantics.WITH_IDEMPOTENCY_KEY and (
+            context is None or context.idempotency_key is None
+        ):
+            return ToolResult.failure(
+                "IDEMPOTENCY_CONTEXT_REQUIRED",
+                "Tool requires a framework-managed idempotency key",
+            )
+
         try:
-            validated_arguments = tool.args_model.model_validate(arguments)
+            if tool.timeout_seconds is None:
+                return await self.invoke_validated(tool, validated_arguments, context=context)
+            async with asyncio.timeout(tool.timeout_seconds):
+                return await self.invoke_validated(tool, validated_arguments, context=context)
+        except TimeoutError:
+            message = "Tool timed out before returning a definite result"
+            if tool.timeout_seconds is not None:
+                message = f"Tool exceeded its {tool.timeout_seconds:g} second timeout"
+            return ToolResult.failure(
+                "TOOL_TIMEOUT",
+                message,
+                retryable=True,
+                details={"tool_name": name},
+            )
+
+    def validate_arguments(
+        self,
+        tool: ToolDefinition[Any],
+        arguments: dict[str, Any],
+    ) -> tuple[BaseModel | None, ToolResult | None]:
+        try:
+            return tool.args_model.model_validate(arguments), None
         except ValidationError as error:
             issues = [
                 {
@@ -80,28 +134,28 @@ class ToolRegistry:
                 }
                 for issue in error.errors(include_url=False, include_input=False)
             ]
-            return ToolResult.failure(
+            return None, ToolResult.failure(
                 "INVALID_ARGUMENTS",
                 "Tool arguments failed validation",
                 details={"issues": issues},
             )
 
+    async def invoke_validated(
+        self,
+        tool: ToolDefinition[Any],
+        validated_arguments: BaseModel,
+        *,
+        context: ToolExecutionContext | None,
+    ) -> ToolResult:
         try:
-            async with asyncio.timeout(tool.timeout_seconds):
-                if inspect.iscoroutinefunction(tool.handler):
-                    raw_result = await tool.handler(validated_arguments)
-                else:
-                    raw_result = await asyncio.to_thread(tool.handler, validated_arguments)
-                    if inspect.isawaitable(raw_result):
-                        raw_result = await raw_result
-                result = _JSON_VALUE_ADAPTER.validate_python(raw_result)
-        except TimeoutError:
-            return ToolResult.failure(
-                "TOOL_TIMEOUT",
-                f"Tool exceeded its {tool.timeout_seconds:g} second timeout",
-                retryable=True,
-                details={"tool_name": name},
-            )
+            raw_result = await _call_handler(tool, validated_arguments, context)
+            result = _JSON_VALUE_ADAPTER.validate_python(raw_result)
+        except (TimeoutError, httpx.TimeoutException) as error:
+            # A timeout can be raised by the handler itself after its business
+            # operation has committed.  Keep that outcome unknown so the
+            # durable executor can apply the tool's retry semantics and reuse
+            # the original logical call and idempotency key.
+            raise TimeoutError("Tool handler timed out") from error
         except ToolExecutionError as error:
             return ToolResult.failure(
                 error.code,
@@ -113,7 +167,22 @@ class ToolRegistry:
             return ToolResult.failure(
                 "TOOL_FAILED",
                 "Tool execution failed unexpectedly",
-                details={"tool_name": name, "exception_type": type(error).__name__},
+                details={"tool_name": tool.name, "exception_type": type(error).__name__},
             )
 
         return ToolResult.success(result)
+
+
+async def _call_handler(
+    tool: ToolDefinition[Any],
+    validated_arguments: Any,
+    context: ToolExecutionContext | None,
+) -> Any:
+    parameter_count = len(inspect.signature(tool.handler).parameters)
+    arguments = (validated_arguments, context) if parameter_count == 2 else (validated_arguments,)
+    if inspect.iscoroutinefunction(tool.handler):
+        return await tool.handler(*arguments)
+    raw_result = await asyncio.to_thread(tool.handler, *arguments)
+    if inspect.isawaitable(raw_result):
+        return await raw_result
+    return raw_result

@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from minimal_agent import __version__
 from minimal_agent.api.errors import install_error_handlers
 from minimal_agent.api.events import router as events_router
+from minimal_agent.api.orders import router as orders_router
 from minimal_agent.api.runs import router as runs_router
 from minimal_agent.api.sessions import router as sessions_router
 from minimal_agent.config import Settings, get_settings
@@ -44,6 +45,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+        await selected_services.initialize()
         await selected_services.supervisor.recover_interrupted()
         try:
             yield
@@ -61,6 +63,7 @@ def create_app(
     application.include_router(sessions_router)
     application.include_router(runs_router)
     application.include_router(events_router)
+    application.include_router(orders_router)
 
     @application.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:

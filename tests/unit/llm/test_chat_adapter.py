@@ -57,6 +57,7 @@ class _SDK:
 
 @pytest.mark.asyncio
 async def test_chat_adapter_maps_reasoning_content_text_and_usage() -> None:
+    # 验证 Chat 适配器映射推理、正文和用量。
     sdk = _SDK(
         [
             _chunk(delta=SimpleNamespace(reasoning_content="plan ")),
@@ -96,6 +97,7 @@ async def test_chat_adapter_maps_reasoning_content_text_and_usage() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_adapter_assembles_tool_arguments_and_converts_history() -> None:
+    # 验证 Chat 适配器组装工具参数并转换历史消息。
     first = SimpleNamespace(
         index=0,
         id="call_1",
@@ -155,6 +157,7 @@ async def test_chat_adapter_assembles_tool_arguments_and_converts_history() -> N
     assert done.arguments == '{"expression":"2+2"}'
     call = sdk.chat.completions.calls[0]
     assert call["tools"][0]["function"]["name"] == "calculator"
+    assert "max_tokens" not in call
     assert call["messages"][2]["reasoning_content"] == "prior reasoning"
     assert call["messages"][3] == {
         "role": "tool",

@@ -61,6 +61,7 @@ def _test_app(database: Database) -> tuple[FastAPI, str, list[int]]:
 
 @pytest.mark.asyncio
 async def test_sse_endpoint_replays_from_last_event_id(database: Database) -> None:
+    # 验证 SSE 可从最后事件编号继续重放。
     """携带 Last-Event-ID 头时，从该事件之后开始回放，并校验 SSE 响应头格式。"""
     app, run_id, ids = _test_app(database)
     transport = httpx.ASGITransport(app=app)
@@ -83,6 +84,7 @@ async def test_sse_endpoint_replays_from_last_event_id(database: Database) -> No
 
 @pytest.mark.asyncio
 async def test_after_id_takes_precedence_and_errors_are_bounded(database: Database) -> None:
+    # 验证 after_id 优先级及错误响应大小边界。
     """query 参数 after_id 优先于 Last-Event-ID 头；非法 ID 返回 400，缺失 run 返回 404。"""
     app, run_id, ids = _test_app(database)
     transport = httpx.ASGITransport(app=app)

@@ -1,7 +1,7 @@
 # Minimal Agent 完整设计方案
 
-- 文档版本：1.1
-- 状态：步骤 11 Review 修订基线，后续调整必须经用户确认
+- 文档版本：1.3
+- 状态：步骤 13 工具幂等重试与恢复已通过用户 Review，等待下一步骤确认
 - Python：3.12
 - 架构原则：不使用 Agent 框架；领域逻辑与 OpenAI SDK、HTTP、SQLite 解耦
 
@@ -12,7 +12,7 @@
 构建一个最小可用的单 Agent 服务，支持：
 
 1. 独立 Session 和持久化聊天历史。
-2. calculator、本地主板 search、Open-Meteo weather 三个工具。
+2. calculator、本地主板 search、Open-Meteo weather 和订单 CRUD 工具。
 3. 最多 8 步的 ReAct 工具循环。
 4. 历史消息摘要和最近 5 轮完整对话保留。
 5. Responses API 或 Chat Completions 兼容接口的流式正文、模型实际返回的可见推理和工具调用事件。
@@ -22,8 +22,8 @@
 
 ### 1.2 非目标
 
-MVP 不包含用户认证、前端页面、多 Agent、向量数据库、分布式任务队列、并行工具
-调用、多进程 worker 或可恢复的外部副作用工具。三个初始工具均为只读或纯计算。
+MVP 不包含用户认证、多 Agent、向量数据库、分布式任务队列、并行工具调用、多进程
+worker 或外部不可逆副作用工具。订单写操作仅作用于本地 SQLite，并提供持久化幂等语义。
 
 ### 1.3 部署约束
 
@@ -48,13 +48,14 @@ RunSupervisor ──启动并持有──> AgentLoop
                               └─ ToolRegistry
                                    ├─ calculator
                                    ├─ search
-                                   └─ weather
+                                   ├─ weather
+                                   └─ order_create/get/list/update/delete
           │                         │
           └──────────┬──────────────┘
                      ▼
             SQLite Repositories
-            sessions / messages / runs
-            traces / stream_events
+            sessions / messages / runs / orders
+            traces / stream_events / order_operations
 ```
 
 接口层只负责校验和状态码；AgentLoop 只依赖协议；存储层不依赖 FastAPI；OpenAI
@@ -87,7 +88,8 @@ minimal-agent/
 │  │  ├─ errors.py
 │  │  ├─ sessions.py
 │  │  ├─ runs.py
-│  │  └─ events.py
+│  │  ├─ events.py
+│  │  └─ orders.py
 │  ├─ agent/
 │  │  ├─ loop.py
 │  │  ├─ context.py
@@ -109,7 +111,8 @@ minimal-agent/
 │  │  ├─ registry.py
 │  │  ├─ calculator.py
 │  │  ├─ search.py
-│  │  └─ weather.py
+│  │  ├─ weather.py
+│  │  └─ orders.py
 │  ├─ streaming/
 │  │  ├─ events.py
 │  │  ├─ buffer.py
@@ -117,11 +120,13 @@ minimal-agent/
 │  ├─ storage/
 │  │  ├─ database.py
 │  │  ├─ schema.sql
-│  │  └─ repositories.py
+│  │  ├─ repositories.py
+│  │  └─ orders.py
 │  └─ schemas/
 │     ├─ api.py
 │     ├─ session.py
 │     ├─ message.py
+│     ├─ order.py
 │     ├─ run.py
 │     └─ trace.py
 └─ tests/
@@ -208,10 +213,31 @@ Trace 不保存 API Key，不保存隐藏思维链，并限制错误正文和外
 `messages` 保存完整语义消息，用于后续 Context；`stream_events` 保存可重放的标准化
 增量；`traces` 保存内部执行诊断，三者职责不混用。
 
+### 4.6 orders 与 order_operations
+
+`orders` 保存客户、商品、数量、单价、状态、版本号及创建/更新时间。金额使用十进制文本
+存储，避免浮点误差；对外同时返回计算得到的 `total_amount`。状态包括 `pending`、
+`confirmed`、`shipped`、`completed`、`cancelled`。
+
+`order_operations` 以 `idempotency_key` 为主键，保存写操作类型、规范化请求哈希和成功
+响应。相同键和相同请求直接重放原响应；相同键用于不同请求返回冲突。更新和删除要求
+调用方提供当前 `expected_version`。业务写入和幂等记录在同一事务提交，响应丢失后的
+重试不会重复创建或重复修改订单。
+
+### 4.7 tool_invocations
+
+`tool_invocations` 保存一次模型工具决策对应的稳定逻辑调用：Run/步骤、供应商 call ID、
+工具名、完整规范化参数及哈希、框架幂等键、重试语义、尝试次数和结果。状态为
+`pending`、`succeeded`、`failed`、`unknown`。工具调用消息与逻辑调用在同一事务创建；
+确定工具结果与 tool result 消息在同一事务提交，避免只有一侧落库。
+
 ## 5. 工具系统
 
-`ToolDefinition` 包含名称、描述、Pydantic 参数模型、处理函数和超时。注册中心负责
-名称唯一性、JSON Schema 导出、参数验证、执行超时和错误归一化。
+`ToolDefinition` 包含名称、描述、Pydantic 参数模型、处理函数、重试语义和可选的工具
+专属超时。重试语义为 `safe`、`with_idempotency_key`、`never`，默认 `never`。注册中心
+负责名称唯一性、JSON Schema、参数验证和单次 handler 调用；handler 自身抛出的 Python
+或 HTTP 传输超时保持结果未知，不归一化为确定失败。`DurableToolExecutor` 负责逻辑调用
+持久化、超时分类和最多一次自动重试。应用不设置所有工具共用的执行截止。
 
 统一结果：
 
@@ -249,6 +275,13 @@ Trace 不保存 API Key，不保存隐藏思维链，并限制错误正文和外
 将可用工具限制为该工具；缺少关键参数时要求用户补充，不让模型猜测。未知名称作为
 普通文本处理并在必要时说明工具不存在。
 
+### 5.5 订单工具
+
+提供 `order_create`、`order_get`、`order_list`、`order_update`、`order_delete`。读取工具声明
+为 `read/safe`；写工具声明为 `write/with_idempotency_key`。执行器在首次落库前生成幂等键，
+通过 `ToolExecutionContext` 传给 handler，模型参数中不包含该键。超时重试和进程恢复均复用
+原参数与原键；更新和删除仍使用 `expected_version` 检测并发覆盖。
+
 ## 6. LLM 适配与 ReAct 循环
 
 优先使用 OpenAI Responses API 原生 Function Calling，也支持 OpenAI-compatible Chat
@@ -263,20 +296,26 @@ OpenAI 事件先映射为内部 Pydantic 类型，AgentLoop 不直接依赖 SDK 
 1. 保存用户消息并创建 Run。
 2. 装配当前 Session Context，必要时压缩。
 3. 调用 LLM 并消费流事件。
-4. 若产生完整工具调用，验证参数、执行工具、持久化结果并进入下一步。
+4. 若产生完整工具调用，先持久化固定逻辑调用，再执行工具；超时按声明最多重试一次。
 5. 若产生最终正文，持久化 assistant 消息并完成 Run。
-6. 每一步前检查 8 步限制、总运行时限和 Context 限制。
+6. 每一步前检查 8 步限制和 Context 限制；不设置整次 Run 的墙钟截止时间。
 
-LLM 对超时、429、连接故障和 5xx 最多重试 3 次，使用带抖动的短指数退避。每次
-失败均写 Trace；工具错误作为结构化结果返回 Agent，不在工具层无限重试。
+普通 LLM 请求不发送 `max_output_tokens`/`max_tokens`，流式适配器也不设置整次生成的
+应用层截止时间。LLM HTTP 客户端仍保留每阶段连接/读写/连接池等待超时，并对该类传输
+超时、429、连接故障和 5xx 最多重试 3 次，使用带抖动的短指数退避。每次失败均写
+Trace。确定的工具错误作为结构化结果返回 Agent；结果未知时仅对 `safe` 或具有幂等键的
+调用重试一次。工具 handler 在业务提交后抛出超时也按未知结果处理，订单重试继续复用原
+幂等键。第二次仍未知时以 `TOOL_RESULT_UNKNOWN` 终止 Run，不重新询问模型。
 
 ## 7. Context 与压缩
 
 Context 顺序：系统提示词、工具定义、Session 摘要、摘要覆盖范围之后的历史消息、
 当前用户输入。SQLite 是会话真源，不依赖远端 `previous_response_id` 保存状态。
 
-每次 LLM 调用前由 `TokenCounter` 估算输入。模型窗口大小通过配置明确提供；达到
-80% 时只压缩已经完成的旧轮次，保留最近 5 个完整轮次和当前未完成 Run。
+每次 LLM 调用前由 `TokenCounter` 估算输入。应用启动时通过 OpenAI-compatible
+`/models` 获取当前 `LLM_MODEL` 的上下文窗口并在进程内缓存；元数据缺失时
+不猜测默认值。达到窗口的 80% 时只压缩已经完成的旧轮次，保留最近 5 个
+完整轮次和当前未完成 Run。
 
 摘要必须保留用户偏好、事实、未完成任务、关键决定和关键工具结果。摘要完成后在同一
 事务中更新正文和 `summary_through_seq`。若没有可压缩轮次但仍超限，Run 以
@@ -290,7 +329,7 @@ Context 顺序：系统提示词、工具定义、Session 摘要、摘要覆盖�
 - `reasoning.started`、`reasoning.delta`、`reasoning.done`
 - `assistant.delta`、`assistant.done`
 - `tool_call.delta`、`tool_call.ready`
-- `tool.started`、`tool.completed`、`tool.failed`
+- `tool.started`、`tool.retrying`、`tool.unknown`、`tool.completed`、`tool.failed`
 - `run.completed`、`run.failed`
 
 将供应商实际返回的 `reasoning_text`、`reasoning_summary_text`、`reasoning_content` 和
@@ -312,7 +351,7 @@ assistant 消息。未闭合标签标记为 `completed=false`；若该步也没�
 
 Agent 将标准化事件放入有界 `asyncio.Queue`，单写入器保持顺序。累计 8 KiB、经过
 100 ms、遇到屏障事件或回合结束时批量提交。只合并相邻且同类型、同 item 的 delta。
-屏障事件包括工具 ready/完成/失败、assistant.done 和 Run 终态。
+屏障事件包括工具 ready/开始/重试/未知/完成/失败、assistant.done 和 Run 终态。
 
 批量提交后才通知 SSE 消费端。强制杀进程最多可能丢失尚未刷新的约 100 ms 增量；
 零丢失需要逐事件写入或外部持久队列，超出 MVP 范围。
@@ -323,8 +362,14 @@ Agent 将标准化事件放入有界 `asyncio.Queue`，单写入器保持顺序�
 `Last-Event-ID`，也支持 `after_id` 查询参数。服务端从事件表按 `id` 顺序补发，15 秒
 无数据发送不落库的注释心跳。客户端断开不取消 Agent Run。
 
-进程启动时将遗留 running Run 标记为 `PROCESS_RESTARTED`。已提交事件仍可重放，
-但中断的模型流不尝试续传。
+进程启动时检查遗留 running Run。若最后一步已有完整 `tool_invocations` 边界，则从该记录
+恢复：已完成结果直接进入下一模型步骤，`pending/unknown` 使用原参数和原键继续允许的
+剩余尝试。中断的模型流或缺少完整工具边界的 Run 标记为 `PROCESS_RESTARTED`。
+
+历史页面不使用永不主动结束的 SSE 接口做普通查询。前端通过分页 JSON 接口读取完整
+持久化事件，恢复最近 Run 的事件列表和 Trace；若该 Run 仍为 running，再从最后一个
+事件 ID 连接 SSE。历史推理按 `turn.started`/`turn.completed` 划分回合，并放到该回合
+的 `tool_call.ready` 对应工具消息或 `assistant.done` 对应最终回答之前。
 
 ## 9. HTTP API
 
@@ -332,16 +377,25 @@ Agent 将标准化事件放入有界 `asyncio.Queue`，单写入器保持顺序�
 - `POST /v1/sessions`
 - `GET /v1/sessions`
 - `GET /v1/sessions/{session_id}`
+- `PATCH /v1/sessions/{session_id}`：修改对话标题
+- `DELETE /v1/sessions/{session_id}`：级联删除完整对话，无响应正文
 - `GET /v1/sessions/{session_id}/messages`
 - `POST /v1/sessions/{session_id}/messages`：返回 202、run_id 和 events_url
 - `GET /v1/runs/{run_id}`
 - `GET /v1/runs/{run_id}/trace`
+- `GET /v1/runs/{run_id}/reasoning`：从持久化事件聚合历史推理
+- `GET /v1/runs/{run_id}/event-history`：使用 `after_id`、`limit` 分页读取持久化事件
 - `GET /v1/runs/{run_id}/events`：SSE
+- `POST /v1/orders`、`GET /v1/orders`：创建和分页/状态筛选订单
+- `GET/PATCH/DELETE /v1/orders/{order_id}`：读取、按版本更新或删除订单
 
 同一 Session 已有 running Run 时返回 `409 SESSION_BUSY`。请求不存在返回 404；参数
 问题返回 422；上游失败通过 Run 终态事件表达。所有错误使用稳定的 Pydantic envelope。
+存在 running Run 时同样禁止删除 Session，避免后台任务继续写入已删除的数据图。
 
 SSE 返回 `text/event-stream`、`Cache-Control: no-cache`、`X-Accel-Buffering: no`。
+订单写 API 要求 `Idempotency-Key` 请求头；更新请求体和删除查询参数要求当前版本。幂等键
+复用冲突及版本冲突返回 409，缺失订单返回 404。
 
 ## 10. 一致性、并发和恢复
 
@@ -356,7 +410,8 @@ RunSupervisor 持有后台 Task 强引用并清理完成 Task。应用关闭时�
 
 配置来自环境变量和 `.env`，真实 `.env` 不提交。API Key 使用 `SecretStr`，不得进入
 日志、Trace、SSE 或异常响应。真实 LLM 客户端构造时再校验 Key 和模型，健康检查无需
-外部凭证。
+外部凭证。`.env.example` 只把 `LLM_API_KEY` 和 `LLM_MODEL` 作为待填写项；兼容端点、
+API 风格和运行参数均以注释形式提供，未覆盖时使用代码默认值。
 
 所有输入、工具参数、第三方响应和事件 payload 均由 Pydantic 验证。限制用户消息、
 表达式、搜索结果、外部响应、Trace 和 SSE payload 大小。日志使用 run_id、session_id
@@ -368,11 +423,13 @@ RunSupervisor 持有后台 Task 强引用并清理完成 Task。应用关闭时�
 每个测试使用临时 SQLite。
 
 单元测试覆盖配置、Repository、工具安全、工具 Schema、事件映射、参数跨 chunk 拼接、
-缓冲阈值、Context 装配、压缩边界、重试和错误映射。
+缓冲阈值、Context 装配、压缩边界、重试和错误映射。工具持久化边界使用 SQLite 故障
+注入验证 tool call/invocation 与 tool result/终态分别原子提交。
 
 集成测试覆盖普通回答、连续工具调用、非法工具、Session 隔离、摘要不重复、最大步骤、
-总超时、LLM/工具失败、Trace、SSE 顺序、断线重连、心跳、终态刷新及客户端断开后
-Run 继续执行。
+LLM/工具失败、Trace、SSE 顺序、断线重连、心跳、终态刷新及客户端断开后
+Run 继续执行。超时测试使用事件屏障控制并发时序；恢复测试重建完整服务图，并覆盖业务
+提交后、工具结果落库前中断时复用原参数和幂等键的场景。
 
 每一步最低质量门禁：`pytest`、`ruff check`、`ruff format --check` 全部通过。
 
@@ -393,7 +450,7 @@ Run 继续执行。
 ### 步骤 3：工具协议与 calculator
 
 实现 ToolDefinition、注册中心、统一结果/错误和安全 AST calculator。验收：Schema、
-参数验证、超时、危险表达式拒绝和计算正确性测试通过。
+参数验证、可选工具专属超时、危险表达式拒绝和计算正确性测试通过。
 
 ### 步骤 4：本地主板 search
 
@@ -422,7 +479,7 @@ Session 隔离、最近 5 轮、只压缩已完成轮次、重复摘要保护和
 
 ### 步骤 9：AgentLoop 与 RunSupervisor
 
-连接 LLM、工具、Context、存储和事件流，实现 8 步/总时限/Context 限制。验收：普通
+连接 LLM、工具、Context、存储和事件流，实现 8 步/Context 限制。验收：普通
 回答、工具循环、参数错误回传、终态原子性、启动恢复和完整 Trace 测试通过。
 
 ### 步骤 10：完整 HTTP API
@@ -439,6 +496,19 @@ Session 隔离、最近 5 轮、只压缩已完成轮次、重复摘要保护和
 `<think>` 双路捕获、供应商无关 live test、逐工具测试契约，以及写工具副作用/重试语义
 约定。该修订不改变 SQLite 表结构，SSE 只增加向后兼容的事件和 payload 字段。
 
+### 步骤 12：订单模块与 Agent CRUD 工具
+
+增加订单 Schema、SQLite Repository、HTTP CRUD、五个 Agent 工具以及持久化幂等操作表。
+验收覆盖重复请求、并发同键、响应丢失后重试、参数冲突、版本冲突、事务回滚、Agent
+端到端工具调用和 OpenAPI 契约；完成后暂停等待用户 Review。
+
+### 步骤 13：工具幂等重试与重启恢复
+
+增加三态重试声明、schema v3 `tool_invocations`、框架执行上下文和固定逻辑调用执行器。
+订单写工具不再接收模型生成的幂等键；工具专属超时后仅重试一次，结果仍未知时终止 Run。
+启动恢复只在完整持久化工具边界继续执行。验收覆盖同参数同键重试、重复下单防护、
+`never` 禁止重试、两次未知终止和进程恢复。
+
 ## 14. 计划变更控制
 
 发现更优方案时先在 `docs/progress.md` 的“优化建议/待确认”中记录：建议、原因、影响、
@@ -454,5 +524,20 @@ Session 隔离、最近 5 轮、只压缩已完成轮次、重复摘要保护和
 - 兼容：通用 `LLM_*` 为推荐配置，旧 `OPENAI_*`/`DEEPSEEK_*` 环境变量别名继续接受。
 - 成本：真实 `full` profile 设置全局调用预算，默认测试仍不访问付费 API。
 - 确认：2026-10-24 用户确认本计划并要求开始执行。
+
+## 16. 版本 1.2 调整记录
+
+- 原因：2026-10-25 用户明确要求新增订单模块，并允许 Agent 使用订单增删改查工具。
+- 影响：SQLite schema 升级到版本 2，新增两个表、两条 API 路径和五个工具；不改变既有
+  Session、Run、SSE 与推理协议。
+- 一致性：订单写操作和幂等响应原子提交，版本号用于检测并发覆盖。
+
+## 17. 版本 1.3 调整记录
+
+- 原因：2026-10-25 用户确认实现工具超时后的单次安全重试和 Agent 可感知幂等声明。
+- 影响：SQLite schema 升级到版本 3，新增 `tool_invocations`；SSE 增加
+  `tool.retrying/tool.unknown`，订单工具参数移除 `idempotency_key`。
+- 一致性：框架逻辑调用与 tool call 消息原子创建，确定结果与 tool result 消息原子提交；
+  订单业务写入继续与 `order_operations` 在同一事务完成。
 
 ​	

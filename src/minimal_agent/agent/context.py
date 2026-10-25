@@ -10,6 +10,7 @@ from typing import Protocol
 
 from minimal_agent.agent.compression import SessionSummarizer
 from minimal_agent.llm import LLMRequest
+from minimal_agent.llm.models import ModelContextWindow
 from minimal_agent.schemas import MessageKind, MessageRecord, MessageRole, RunStatus
 from minimal_agent.storage import (
     InvalidStateError,
@@ -122,7 +123,8 @@ class ContextBuilder:
         token_counter: TokenCounter,
         summarizer: SessionSummarizer,
         system_prompt: str,
-        context_window_tokens: int,
+        context_window_tokens: int | None = None,
+        model_context_window: ModelContextWindow | None = None,
         trigger_ratio: float = 0.80,
         recent_turns_to_keep: int = 5,
         max_output_tokens: int | None = None,
@@ -131,8 +133,12 @@ class ContextBuilder:
     ) -> None:
         if not system_prompt.strip():
             raise ValueError("System prompt must not be empty")
-        if context_window_tokens < 1:
-            raise ValueError("context_window_tokens must be configured explicitly")
+        if (context_window_tokens is None) == (model_context_window is None):
+            raise ValueError(
+                "Exactly one of context_window_tokens or model_context_window is required"
+            )
+        if context_window_tokens is not None and context_window_tokens < 1:
+            raise ValueError("context_window_tokens must be positive")
         if not 0 < trigger_ratio < 1:
             raise ValueError("trigger_ratio must be between 0 and 1")
         if recent_turns_to_keep < 1:
@@ -143,7 +149,14 @@ class ContextBuilder:
         self._token_counter = token_counter
         self._summarizer = summarizer
         self._system_prompt = system_prompt.strip()
-        self._trigger_tokens = max(1, math.floor(context_window_tokens * trigger_ratio))
+        self._context_window_tokens = context_window_tokens
+        self._model_context_window = model_context_window
+        self._trigger_ratio = trigger_ratio
+        self._trigger_tokens = (
+            max(1, math.floor(context_window_tokens * trigger_ratio))
+            if context_window_tokens is not None
+            else None
+        )
         self._recent_turns_to_keep = recent_turns_to_keep
         self._max_output_tokens = max_output_tokens
         self._reasoning_effort = reasoning_effort
@@ -158,12 +171,15 @@ class ContextBuilder:
     ) -> PreparedContext:
         """Build context, performing at most one summary advancement when required."""
 
+        trigger_tokens = await self._get_trigger_tokens()
+
         context = self._build(
             session_id=session_id,
             current_user_message_id=current_user_message_id,
             tools=tools,
+            trigger_tokens=trigger_tokens,
         )
-        if context.estimated_input_tokens < self._trigger_tokens:
+        if context.estimated_input_tokens < trigger_tokens:
             return context
 
         session = self._sessions.require(session_id)
@@ -201,8 +217,9 @@ class ContextBuilder:
             session_id=session_id,
             current_user_message_id=current_user_message_id,
             tools=tools,
+            trigger_tokens=trigger_tokens,
         )
-        if rebuilt.estimated_input_tokens >= self._trigger_tokens:
+        if rebuilt.estimated_input_tokens >= trigger_tokens:
             raise ContextLimitExceeded(
                 "Context remains above the configured threshold after safe compression"
             )
@@ -214,6 +231,7 @@ class ContextBuilder:
         session_id: str,
         current_user_message_id: str,
         tools: ToolRegistry,
+        trigger_tokens: int,
     ) -> PreparedContext:
         session = self._sessions.require(session_id)
         current = self._messages.get(current_user_message_id)
@@ -268,11 +286,21 @@ class ContextBuilder:
         return PreparedContext(
             request=request,
             estimated_input_tokens=self._token_counter.count_request(request),
-            trigger_tokens=self._trigger_tokens,
+            trigger_tokens=trigger_tokens,
             summary_through_seq=session.summary_through_seq,
             requested_tools=mentions.requested,
             unknown_tool_mentions=mentions.unknown,
         )
+
+    async def _get_trigger_tokens(self) -> int:
+        if self._trigger_tokens is not None:
+            return self._trigger_tokens
+        if self._model_context_window is None:
+            raise RuntimeError("Model context window provider is missing")
+        context_window_tokens = await self._model_context_window.get()
+        self._context_window_tokens = context_window_tokens
+        self._trigger_tokens = max(1, math.floor(context_window_tokens * self._trigger_ratio))
+        return self._trigger_tokens
 
     def _compression_candidates(
         self,

@@ -40,11 +40,11 @@ class LLMSessionSummarizer:
         llm: LLMClient,
         *,
         prompt: str,
-        max_output_tokens: int = 1200,
+        max_output_tokens: int | None = None,
     ) -> None:
         if not prompt.strip():
             raise ValueError("Summary prompt must not be empty")
-        if max_output_tokens < 1:
+        if max_output_tokens is not None and max_output_tokens < 1:
             raise ValueError("max_output_tokens must be positive")
         self._llm = llm
         self._prompt = prompt.strip()

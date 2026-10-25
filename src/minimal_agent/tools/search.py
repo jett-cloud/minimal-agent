@@ -16,7 +16,7 @@ from pydantic import (
     field_validator,
 )
 
-from minimal_agent.tools.base import ToolDefinition, ToolSideEffect
+from minimal_agent.tools.base import ToolDefinition, ToolRetrySemantics, ToolSideEffect
 
 _WHITESPACE = re.compile(r"\s+")
 _NON_ALPHANUMERIC = re.compile(r"[^\w]+", flags=re.UNICODE)
@@ -249,7 +249,7 @@ def _score_record(
 def create_mainboard_search_tool(
     dataset_path: Path,
     *,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float | None = None,
 ) -> ToolDefinition[MainboardSearchArguments]:
     """Load a catalogue once and create the registry-compatible search tool."""
 
@@ -275,4 +275,5 @@ def create_mainboard_search_tool(
         handler=search_mainboards,
         timeout_seconds=timeout_seconds,
         side_effect=ToolSideEffect.READ,
+        retry_semantics=ToolRetrySemantics.SAFE,
     )

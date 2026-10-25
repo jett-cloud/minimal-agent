@@ -66,6 +66,16 @@ class _FixedCounter:
         return self.count
 
 
+class _FixedModelContextWindow:
+    def __init__(self, tokens: int) -> None:
+        self.tokens = tokens
+        self.calls = 0
+
+    async def get(self) -> int:
+        self.calls += 1
+        return self.tokens
+
+
 class _SummaryAwareCounter:
     def count_request(self, request: object) -> int:
         input_items = request.input  # type: ignore[attr-defined]
@@ -141,6 +151,7 @@ def _builder(
 
 
 def test_tool_mentions_are_exact_case_sensitive_and_deduplicated() -> None:
+    # 验证工具提及区分大小写、精确匹配并去重。
     mentions = parse_tool_mentions(
         "@calculator then @weather and @calculator; ignore x@search and @Weather",
         ("calculator", "weather", "search"),
@@ -151,7 +162,42 @@ def test_tool_mentions_are_exact_case_sensitive_and_deduplicated() -> None:
 
 
 @pytest.mark.asyncio
+async def test_context_uses_discovered_model_window_and_caches_trigger(database: Database) -> None:
+    # 验证上下文使用探测到的模型窗口并缓存压缩阈值。
+    sessions, messages, runs = _repositories(database)
+    session = sessions.create()
+    current = _start_turn(session.id, "hello", messages, runs)
+    model_window = _FixedModelContextWindow(1_000)
+    builder = ContextBuilder(
+        sessions=sessions,
+        messages=messages,
+        runs=runs,
+        token_counter=_FixedCounter(1),
+        summarizer=_RecordingSummarizer(),
+        system_prompt="system contract",
+        model_context_window=model_window,
+        trigger_ratio=0.8,
+    )
+
+    first = await builder.prepare(
+        session_id=session.id,
+        current_user_message_id=current.id,
+        tools=ToolRegistry(),
+    )
+    second = await builder.prepare(
+        session_id=session.id,
+        current_user_message_id=current.id,
+        tools=ToolRegistry(),
+    )
+
+    assert first.trigger_tokens == 800
+    assert second.trigger_tokens == 800
+    assert model_window.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_context_is_isolated_to_the_requested_session(database: Database) -> None:
+    # 验证上下文仅包含指定会话的数据。
     sessions, messages, runs = _repositories(database)
     first = sessions.create(session_id="first")
     second = sessions.create(session_id="second")
@@ -184,6 +230,7 @@ async def test_context_is_isolated_to_the_requested_session(database: Database) 
 async def test_registered_tool_mention_restricts_tools_and_unknown_is_plain_text(
     database: Database,
 ) -> None:
+    # 验证已注册工具提及会限制工具，未知提及按正文处理。
     sessions, messages, runs = _repositories(database)
     session = sessions.create()
     current = _start_turn(
@@ -215,6 +262,7 @@ async def test_registered_tool_mention_restricts_tools_and_unknown_is_plain_text
 async def test_compression_keeps_five_recent_complete_turns_and_advances_once(
     database: Database,
 ) -> None:
+    # 验证压缩保留最近五个完整轮次且摘要只推进一次。
     sessions, messages, runs = _repositories(database)
     session = sessions.create()
     for index in range(6):
@@ -271,6 +319,7 @@ async def test_compression_keeps_five_recent_complete_turns_and_advances_once(
 async def test_running_turn_is_never_compressed_and_limit_error_is_structured(
     database: Database,
 ) -> None:
+    # 验证运行中轮次不被压缩且超限错误结构化。
     sessions, messages, runs = _repositories(database)
     session = sessions.create()
     current = _start_turn(session.id, "x" * 1000, messages, runs)
@@ -295,6 +344,7 @@ async def test_running_turn_is_never_compressed_and_limit_error_is_structured(
 
 @pytest.mark.asyncio
 async def test_context_replays_tool_call_and_result_after_current_user(database: Database) -> None:
+    # 验证上下文在当前用户消息后重放工具调用及结果。
     sessions, messages, runs = _repositories(database)
     session = sessions.create()
     current = _start_turn(session.id, "calculate", messages, runs)
@@ -340,6 +390,7 @@ async def test_context_replays_tool_call_and_result_after_current_user(database:
 
 @pytest.mark.asyncio
 async def test_current_message_must_belong_to_session(database: Database) -> None:
+    # 验证当前消息必须属于指定会话。
     sessions, messages, runs = _repositories(database)
     first = sessions.create()
     second = sessions.create()
@@ -360,6 +411,7 @@ async def test_current_message_must_belong_to_session(database: Database) -> Non
 
 @pytest.mark.asyncio
 async def test_current_message_must_own_a_running_run(database: Database) -> None:
+    # 验证当前消息必须关联运行中的任务。
     sessions, messages, runs = _repositories(database)
     session = sessions.create()
     old_user = messages.append(
@@ -393,6 +445,7 @@ async def test_current_message_must_own_a_running_run(database: Database) -> Non
 
 @pytest.mark.asyncio
 async def test_concurrent_summary_winner_prevents_duplicate_coverage(database: Database) -> None:
+    # 验证并发摘要只允许一个胜出并避免重复覆盖。
     sessions, messages, runs = _repositories(database)
     session = sessions.create()
     for index in range(6):
@@ -437,6 +490,7 @@ async def test_concurrent_summary_winner_prevents_duplicate_coverage(database: D
 
 
 def test_heuristic_counter_counts_non_ascii_and_tool_schema() -> None:
+    # 验证启发式计数器统计非 ASCII 文本和工具 Schema。
     counter = HeuristicTokenCounter()
     from minimal_agent.llm import LLMRequest
 
@@ -451,17 +505,19 @@ def test_heuristic_counter_counts_non_ascii_and_tool_schema() -> None:
 
 
 def test_checked_in_prompts_are_non_empty_and_describe_required_contracts() -> None:
+    # 验证仓库内提示词非空且描述必要契约。
     system_prompt = load_prompt(Path("prompts/system.md"))
     summary_prompt = load_prompt(Path("prompts/summarize.md"))
 
     assert "@calculator" in system_prompt
-    assert "exactly one action" in system_prompt
-    assert "user preferences" in summary_prompt
-    assert "important tool results" in summary_prompt
+    assert "只能选择下面其中一种操作" in system_prompt
+    assert "用户偏好" in summary_prompt
+    assert "重要工具返回结果" in summary_prompt
 
 
 @pytest.mark.asyncio
 async def test_llm_summarizer_collects_deltas_without_duplicating_done_text() -> None:
+    # 验证 LLM 摘要器收集增量且不重复完成文本。
     llm = FakeLLM(
         [
             [

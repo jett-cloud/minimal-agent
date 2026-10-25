@@ -16,26 +16,34 @@ from minimal_agent.agent import (
 from minimal_agent.config import Settings
 from minimal_agent.llm import (
     LLMClient,
+    ModelContextWindow,
+    ModelContextWindowError,
     OpenAIChatCompletionsLLM,
+    OpenAIModelContextWindow,
     OpenAIResponsesLLM,
     ReasoningAwareLLM,
     RetryPolicy,
+    StaticModelContextWindow,
     create_openai_sdk_client,
 )
 from minimal_agent.storage import (
     Database,
     MessageRepository,
+    OrderRepository,
     RunRepository,
     SessionRepository,
     StreamEventRepository,
+    ToolInvocationRepository,
     TraceRepository,
 )
 from minimal_agent.streaming import EventPublisher
 from minimal_agent.tools import (
     CALCULATOR_TOOL,
+    DurableToolExecutor,
     ToolRegistry,
     create_mainboard_search_tool,
     create_open_meteo_http_client,
+    create_order_tools,
     create_weather_tool,
 )
 
@@ -49,11 +57,28 @@ class ApplicationServices:
     runs: RunRepository
     traces: TraceRepository
     stream_events: StreamEventRepository
+    orders: OrderRepository
+    tool_invocations: ToolInvocationRepository
     publisher: EventPublisher
     supervisor: RunSupervisor
     agent_unavailable_reason: str | None = None
+    model_context_window: ModelContextWindow | None = None
     weather_http_client: httpx.AsyncClient | None = None
     llm_sdk_client: Any | None = None
+
+    async def initialize(self) -> None:
+        """Resolve remote model metadata before accepting Agent Runs."""
+
+        if self.agent_unavailable_reason is not None or self.model_context_window is None:
+            return
+        try:
+            await self.model_context_window.get()
+        except ModelContextWindowError as error:
+            self.agent_unavailable_reason = f"{error.code}: {error.message}"
+        except Exception as error:
+            self.agent_unavailable_reason = (
+                f"Model context window discovery failed ({type(error).__name__})"
+            )
 
     async def close(self) -> None:
         await self.supervisor.shutdown(grace_seconds=self.settings.agent_shutdown_grace_seconds)
@@ -78,6 +103,8 @@ def build_services(
     runs = RunRepository(database)
     traces = TraceRepository(database)
     stream_events = StreamEventRepository(database)
+    orders = OrderRepository(database)
+    tool_invocations = ToolInvocationRepository(database)
     publisher = EventPublisher()
     supervisor = RunSupervisor(None, runs=runs, publisher=publisher)
     services = ApplicationServices(
@@ -88,6 +115,8 @@ def build_services(
         runs=runs,
         traces=traces,
         stream_events=stream_events,
+        orders=orders,
+        tool_invocations=tool_invocations,
         publisher=publisher,
         supervisor=supervisor,
     )
@@ -99,7 +128,22 @@ def build_services(
 
     try:
         resolved_llm = llm or _create_llm(settings, services)
+        if llm is not None:
+            if settings.injected_llm_context_window_tokens is None:
+                raise ValueError("Injected LLM context window is not configured")
+            model_context_window: ModelContextWindow = StaticModelContextWindow(
+                settings.injected_llm_context_window_tokens
+            )
+        else:
+            if services.llm_sdk_client is None or settings.llm_model is None:
+                raise RuntimeError("Real LLM services were not initialized")
+            model_context_window = OpenAIModelContextWindow(
+                services.llm_sdk_client.models,
+                model=settings.llm_model,
+            )
+        services.model_context_window = model_context_window
         resolved_tools = tools or _create_tools(settings, services)
+        tool_executor = DurableToolExecutor(resolved_tools, tool_invocations)
         context = ContextBuilder(
             sessions=sessions,
             messages=messages,
@@ -108,13 +152,11 @@ def build_services(
             summarizer=LLMSessionSummarizer(
                 resolved_llm,
                 prompt=load_prompt(settings.summarize_prompt_path),
-                max_output_tokens=settings.llm_max_output_tokens,
             ),
             system_prompt=load_prompt(settings.system_prompt_path),
-            context_window_tokens=settings.context_window_tokens,
+            model_context_window=model_context_window,
             trigger_ratio=settings.context_trigger_ratio,
             recent_turns_to_keep=settings.recent_turns_to_keep,
-            max_output_tokens=settings.llm_max_output_tokens,
             reasoning_effort=settings.llm_reasoning_effort,
             reasoning_summary=settings.llm_reasoning_summary,
         )
@@ -128,8 +170,8 @@ def build_services(
                 traces=traces,
                 stream_events=stream_events,
                 publisher=publisher,
+                tool_executor=tool_executor,
                 max_steps=settings.agent_max_steps,
-                run_timeout_seconds=settings.agent_run_timeout_seconds,
                 stream_flush_bytes=settings.stream_flush_bytes,
                 stream_flush_interval_seconds=settings.stream_flush_interval_ms / 1000,
                 stream_queue_maxsize=settings.stream_queue_maxsize,
@@ -147,9 +189,9 @@ def _agent_configuration_error(
     *,
     injected_llm: LLMClient | None,
 ) -> str | None:
-    if settings.context_window_tokens < 1:
-        return "CONTEXT_WINDOW_TOKENS must be configured"
     if injected_llm is not None:
+        if settings.injected_llm_context_window_tokens is None:
+            return "Injected LLM context window must be configured"
         return None
     if settings.llm_api_key is None or not settings.llm_api_key.get_secret_value().strip():
         return "LLM_API_KEY must be configured"
@@ -173,7 +215,6 @@ def _create_llm(settings: Settings, services: ApplicationServices) -> LLMClient:
     adapter = adapter_type(
         sdk_client,
         model=settings.llm_model,
-        timeout_seconds=settings.llm_timeout_seconds,
         retry_policy=RetryPolicy(max_retries=settings.llm_max_retries),
     )
     return ReasoningAwareLLM(
@@ -191,13 +232,10 @@ def _create_tools(settings: Settings, services: ApplicationServices) -> ToolRegi
     return ToolRegistry(
         [
             CALCULATOR_TOOL,
-            create_mainboard_search_tool(
-                settings.mainboard_data_path,
-                timeout_seconds=settings.tool_timeout_seconds,
-            ),
-            create_weather_tool(
-                weather_http_client,
-                timeout_seconds=settings.tool_timeout_seconds,
+            create_mainboard_search_tool(settings.mainboard_data_path),
+            create_weather_tool(weather_http_client),
+            *create_order_tools(
+                services.orders, timeout_seconds=settings.order_tool_timeout_seconds
             ),
         ]
     )

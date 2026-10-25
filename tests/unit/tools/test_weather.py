@@ -101,6 +101,7 @@ async def execute_weather(
 
 @pytest.mark.asyncio
 async def test_weather_returns_validated_current_and_daily_forecast() -> None:
+    # 验证天气工具返回已校验的当前天气和逐日预报。
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -127,6 +128,7 @@ async def test_weather_returns_validated_current_and_daily_forecast() -> None:
 
 @pytest.mark.asyncio
 async def test_weather_passes_explicit_days_and_temperature_unit() -> None:
+    # 验证天气工具传递明确的天数和温度单位。
     forecast_request: httpx.Request | None = None
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -151,6 +153,7 @@ async def test_weather_passes_explicit_days_and_temperature_unit() -> None:
 
 @pytest.mark.asyncio
 async def test_weather_returns_location_not_found_without_forecast_request() -> None:
+    # 验证地点不存在时不再请求天气预报。
     request_count = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -168,6 +171,7 @@ async def test_weather_returns_location_not_found_without_forecast_request() -> 
 
 @pytest.mark.asyncio
 async def test_weather_normalizes_rate_limit() -> None:
+    # 验证天气工具统一限流错误。
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.host == "geocoding-api.open-meteo.com":
             return httpx.Response(200, json=geocoding_payload())
@@ -183,6 +187,7 @@ async def test_weather_normalizes_rate_limit() -> None:
 
 @pytest.mark.asyncio
 async def test_weather_normalizes_server_error() -> None:
+    # 验证天气工具统一服务端错误。
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="private upstream response")
 
@@ -197,6 +202,7 @@ async def test_weather_normalizes_server_error() -> None:
 
 @pytest.mark.asyncio
 async def test_weather_normalizes_timeout_without_leaking_exception() -> None:
+    # 验证天气工具统一超时错误且不泄漏异常。
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("private upstream details", request=request)
 
@@ -211,6 +217,7 @@ async def test_weather_normalizes_timeout_without_leaking_exception() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("malformed_service", ["geocoding", "forecast"])
 async def test_weather_rejects_malformed_upstream_responses(malformed_service: str) -> None:
+    # 验证天气工具拒绝格式错误的上游响应。
     def handler(request: httpx.Request) -> httpx.Response:
         is_geocoding = request.url.host == "geocoding-api.open-meteo.com"
         if malformed_service == "geocoding" and is_geocoding:
@@ -231,6 +238,7 @@ async def test_weather_rejects_malformed_upstream_responses(malformed_service: s
 
 @pytest.mark.asyncio
 async def test_weather_rejects_non_json_response() -> None:
+    # 验证天气工具拒绝非 JSON 响应。
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"not-json", headers={"content-type": "text/plain"})
 
@@ -242,6 +250,7 @@ async def test_weather_rejects_non_json_response() -> None:
 
 @pytest.mark.asyncio
 async def test_weather_validates_arguments_and_exports_strict_schema() -> None:
+    # 验证天气工具校验参数并导出严格 Schema。
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("Invalid arguments must not start HTTP requests")
 
@@ -267,6 +276,7 @@ async def test_weather_validates_arguments_and_exports_strict_schema() -> None:
 
 @pytest.mark.asyncio
 async def test_open_meteo_client_factory_sets_explicit_timeouts() -> None:
+    # 验证 Open-Meteo 客户端工厂设置明确超时。
     client = create_open_meteo_http_client(timeout_seconds=2.5)
     try:
         assert client.timeout.connect == 2.5

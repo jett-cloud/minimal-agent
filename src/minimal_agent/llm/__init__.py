@@ -22,6 +22,12 @@ from minimal_agent.llm.events import (
     is_terminal_event,
 )
 from minimal_agent.llm.fake_client import FakeLLM
+from minimal_agent.llm.models import (
+    ModelContextWindow,
+    ModelContextWindowError,
+    OpenAIModelContextWindow,
+    StaticModelContextWindow,
+)
 from minimal_agent.llm.openai_chat_client import (
     ChatCompletionsEventMapper,
     OpenAIChatCompletionsLLM,
@@ -43,6 +49,9 @@ __all__ = [
     "LLMEvent",
     "LLMRequest",
     "LLMStreamError",
+    "ModelContextWindow",
+    "ModelContextWindowError",
+    "OpenAIModelContextWindow",
     "OpenAIResponsesLLM",
     "OpenAIChatCompletionsLLM",
     "ReasoningAwareLLM",
@@ -58,6 +67,7 @@ __all__ = [
     "ResponseStarted",
     "ResponsesEventMapper",
     "RetryPolicy",
+    "StaticModelContextWindow",
     "TextDelta",
     "TextDone",
     "ToolArgumentsDelta",

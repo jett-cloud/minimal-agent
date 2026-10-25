@@ -114,6 +114,25 @@ class ToolStartedEvent(_PublicEvent):
     call_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     arguments: dict[str, JsonValue]
+    invocation_id: str | None = None
+    attempt_no: int = Field(default=1, ge=1)
+
+
+class ToolRetryingEvent(_PublicEvent):
+    type: Literal["tool.retrying"] = "tool.retrying"
+    call_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    invocation_id: str = Field(min_length=1)
+    next_attempt_no: int = Field(ge=2)
+
+
+class ToolUnknownEvent(_PublicEvent):
+    type: Literal["tool.unknown"] = "tool.unknown"
+    call_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    invocation_id: str = Field(min_length=1)
+    attempt_no: int = Field(ge=1)
+    error: dict[str, JsonValue]
 
 
 class ToolCompletedEvent(_PublicEvent):
@@ -155,6 +174,8 @@ type PublicStreamEvent = Annotated[
     | ToolCallDeltaEvent
     | ToolCallReadyEvent
     | ToolStartedEvent
+    | ToolRetryingEvent
+    | ToolUnknownEvent
     | ToolCompletedEvent
     | ToolFailedEvent
     | RunCompletedEvent
@@ -173,6 +194,8 @@ BARRIER_EVENT_TYPES = frozenset(
         "assistant.done",
         "tool_call.ready",
         "tool.started",
+        "tool.retrying",
+        "tool.unknown",
         "tool.completed",
         "tool.failed",
         "run.completed",

@@ -19,6 +19,7 @@ def catalog() -> MainboardCatalog:
 
 
 def test_runtime_dataset_is_valid_and_has_balanced_coverage() -> None:
+    # 验证运行时搜索数据集有效且覆盖均衡。
     catalog = MainboardCatalog.from_path(RUNTIME_DATA_PATH)
 
     assert len(catalog.search("ASUS", limit=20)) == 4
@@ -30,6 +31,7 @@ def test_runtime_dataset_is_valid_and_has_balanced_coverage() -> None:
 def test_exact_model_and_alias_queries_rank_deterministically(
     catalog: MainboardCatalog,
 ) -> None:
+    # 验证精确型号和别名查询的排序稳定。
     exact = catalog.search("ROG Alpha B650E-I", limit=5)
     alias = catalog.search("Alpha ITX", limit=5)
 
@@ -41,6 +43,7 @@ def test_exact_model_and_alias_queries_rank_deterministically(
 
 
 def test_brand_filter_and_spec_queries(catalog: MainboardCatalog) -> None:
+    # 验证品牌筛选和规格查询。
     asus_b650 = catalog.search("B650", brand="asus", limit=10)
     ddr4_micro_atx = catalog.search("DDR4 Micro-ATX", limit=10)
     wifi_6e = catalog.search("Wi-Fi 6E", limit=10)
@@ -55,6 +58,7 @@ def test_brand_filter_and_spec_queries(catalog: MainboardCatalog) -> None:
 
 
 def test_limit_and_empty_results(catalog: MainboardCatalog) -> None:
+    # 验证搜索数量限制和空结果。
     assert len(catalog.search("wifi", limit=2)) == 2
     assert catalog.search("TRX50 workstation", limit=5) == []
     assert catalog.search("B650", brand="Gigabyte", limit=5) == []
@@ -62,6 +66,7 @@ def test_limit_and_empty_results(catalog: MainboardCatalog) -> None:
 
 @pytest.mark.asyncio
 async def test_search_tool_exports_strict_schema_and_returns_full_records() -> None:
+    # 验证搜索工具导出严格 Schema 并返回完整记录。
     tool = create_mainboard_search_tool(FIXTURE_PATH, timeout_seconds=1)
     registry = ToolRegistry([tool])
 
@@ -80,6 +85,7 @@ async def test_search_tool_exports_strict_schema_and_returns_full_records() -> N
 
 @pytest.mark.asyncio
 async def test_search_tool_validates_limit_and_blank_filters() -> None:
+    # 验证搜索工具校验数量限制和空筛选条件。
     registry = ToolRegistry([create_mainboard_search_tool(FIXTURE_PATH)])
 
     invalid_limit = await registry.execute(
@@ -110,6 +116,7 @@ def test_dataset_validation(
     contents: str,
     message: str | None,
 ) -> None:
+    # 验证搜索数据集校验。
     path = tmp_path / "mainboards.json"
     path.write_text(contents, encoding="utf-8")
 
@@ -121,6 +128,7 @@ def test_dataset_validation(
 
 
 def test_dataset_rejects_duplicate_ids(tmp_path: Path) -> None:
+    # 验证搜索数据集拒绝重复编号。
     contents = FIXTURE_PATH.read_text(encoding="utf-8")
     first_record = contents[contents.index("{") : contents.index("},\n  {") + 1]
     path = tmp_path / "duplicates.json"

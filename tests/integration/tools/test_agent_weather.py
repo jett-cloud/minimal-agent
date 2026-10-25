@@ -85,6 +85,7 @@ def _forecast() -> dict[str, Any]:
 
 @pytest.mark.asyncio
 async def test_agent_weather_success_is_persisted_and_returned_to_model(tmp_path: Path) -> None:
+    # 验证 Agent 的天气结果会持久化并返回模型。
     def handler(request: httpx.Request) -> httpx.Response:
         payload = (
             _geocoding() if request.url.host == "geocoding-api.open-meteo.com" else _forecast()

@@ -10,6 +10,7 @@ _ROOT = Path(__file__).resolve().parents[3]
 
 @pytest.mark.asyncio
 async def test_agent_search_success_is_persisted_and_returned_to_model(tmp_path: Path) -> None:
+    # 验证 Agent 的搜索结果会持久化并返回模型。
     stream, messages, llm = await run_tool_scenario(
         tmp_path,
         tool_name="search",
